@@ -1,0 +1,418 @@
+import file_streams/read_stream.{type ReadStream}
+import file_streams/read_stream_error.{type ReadStreamError}
+import gleam/bit_array
+import gleam/dict
+import gleam/list
+import gleam/result
+import glexif/exif_tag
+import glexif/internal/utils
+
+pub type ExifParseError {
+  BadHeaders(message: String)
+  InvalidEntry(entry_byte_string: String)
+}
+
+pub type TiffHeader {
+  Intel(header_bytes: BitArray)
+  Motorola(header_bytes: BitArray)
+}
+
+pub type RawExifType {
+  UnsignedByte(bytes: Int)
+  AsciiString(bytes: Int)
+  UnsignedShort(bytes: Int)
+  UnsignedLong(bytes: Int)
+  UnsignedRational(bytes: Int)
+  SignedByte(bytes: Int)
+  Undefined(bytes: Int)
+  SignedShort(bytes: Int)
+  SignedLong(bytes: Int)
+  SignedRational(bytes: Int)
+  SingleFloat(bytes: Int)
+  DoubleFloat(bytes: Int)
+  Unknown(bytes: Int)
+}
+
+pub type ExifSegment {
+  ExifSegment(
+    /// full size of the segment
+    size: Int,
+    /// the raw "Exif" header in byte array form
+    exif_header: BitArray,
+    /// The parsed type of Header (Motorola or Intel)
+    tiff_header: TiffHeader,
+    /// the full segment bit array that includes the TIFF Header  ("MM", or "II")
+    /// but not the Exif" bytes which is used in offset calculations
+    raw_data: BitArray,
+  )
+}
+
+pub type RawExifTag {
+  Make
+  Model
+  Orientation
+  XResolution
+  YResolution
+  ResolutionUnit
+  Software
+  ModifyDate
+  HostComputer
+  YCbCrPositioning
+  ExifOffset
+  ExposureTime
+  FNumber
+  ExposureProgram
+  ISO
+  ExifVersion
+  DateTimeOriginal
+  CreateDate
+  OffsetTime
+  OffsetTimeOriginal
+  OffsetTimeDigitized
+  ComponentsConfiguration
+  ShutterSpeedValue
+  ApertureValue
+
+  IFDLink(Int)
+  EndOfLink
+  // Paired with ExifOffset
+  EndOfIFD
+  // No more offset. End of everything
+  UnknownExifTag(entry_byte_string: String)
+}
+
+// Raw
+pub type RawExifEntry {
+  // tag: 2 bytes
+  // data_type: 2 bytes
+  // component_count: 4 bytes
+  // data_or_offset: 4 bytes
+  RawExifEntry(
+    tag: RawExifTag,
+    data_type: RawExifType,
+    component_count: Int,
+    data: BitArray,
+  )
+}
+
+/// move the stream ahead by reading until the exif marker in the file
+pub fn read_until_marker(
+  rs: read_stream.ReadStream,
+) -> Result(BitArray, ReadStreamError) {
+  case read_stream.read_bytes(rs, 2) {
+    Ok(bytes) -> {
+      let _ = case bytes {
+        <<0xFF, 0xE1>> -> Ok(bytes)
+        _ -> read_until_marker(rs)
+      }
+    }
+    Error(e) -> Error(e)
+  }
+}
+
+/// size is the two bytes after the exif marker
+pub fn read_exif_size(rs: ReadStream) -> Int {
+  case read_stream.read_int16_be(rs) {
+    Ok(val) -> {
+      val
+    }
+    Error(_) -> 0
+  }
+}
+
+pub fn read_exif_segment(
+  rs: ReadStream,
+  exif_full_size: Int,
+) -> Result(ExifSegment, ExifParseError) {
+  // the exif size info is part of the data size itself, and we already read those bytes in
+  let raw_bytes =
+    result.unwrap(read_stream.read_bytes(rs, exif_full_size - 2), <<>>)
+
+  let exif_header_bytes = bit_array.slice(raw_bytes, 0, 6)
+
+  let tiff_header_type =
+    raw_bytes
+    |> bit_array.slice(6, 8)
+    |> result.unwrap(<<>>)
+    |> get_tiff_header
+
+  let raw_data =
+    raw_bytes
+    |> bit_array.slice(6, bit_array.byte_size(raw_bytes) - 6)
+    |> result.unwrap(<<>>)
+
+  case exif_header_bytes, tiff_header_type {
+    Ok(<<69, 120, 105, 102, 0, 0>>), Ok(tiff_header) ->
+      Ok(ExifSegment(
+        size: exif_full_size,
+        exif_header: <<69, 120, 105, 102, 0, 0>>,
+        tiff_header: tiff_header,
+        raw_data: raw_data,
+      ))
+    _, Error(m) -> Error(m)
+    _, _ -> Error(BadHeaders("Generic error"))
+  }
+}
+
+fn get_tiff_header(
+  tiff_header_bytes: BitArray,
+) -> Result(TiffHeader, ExifParseError) {
+  case bit_array.slice(tiff_header_bytes, 0, 2) {
+    Ok(<<0x4d, 0x4d>>) -> Ok(Motorola(tiff_header_bytes))
+    Ok(<<0x49, 0x49>>) -> Ok(Intel(tiff_header_bytes))
+    _ -> Error(BadHeaders("No matching tiff header type (Motorola or Intel)"))
+  }
+}
+
+pub fn parse_exif_data(exif_segment: ExifSegment) -> List(exif_tag.ExifTag) {
+  // let total_entries =
+  //   exif_segment.raw_data
+  //   |> bit_array.slice(8, 2)
+  //   |> result.unwrap(<<>>)
+  //   |> bit_array_to_decimal
+
+  // entries are 12 bytes long. They start at an offset of 8, but including the "MM" header bytes means we start at 10
+  let entry_count =
+    bit_array.slice(exif_segment.raw_data, 8, 2)
+    |> result.unwrap(<<0, 0>>)
+    |> utils.bit_array_to_decimal
+
+  get_raw_entries(exif_segment.raw_data, 10, entry_count, 1)
+  |> list.map(fn(r) {
+    case r {
+      Ok(raw_tag) -> raw_exif_entry_to_parsed_tag(raw_tag)
+      Error(_) -> exif_tag.Unknown
+    }
+  })
+}
+
+pub fn get_raw_entries(
+  segment_bytes: BitArray,
+  start: Int,
+  total_segment_count: Int,
+  current_entry: Int,
+) -> List(Result(RawExifEntry, ExifParseError)) {
+  let entry_bits = bit_array.slice(segment_bytes, start, 12)
+
+  let tag = parse_raw_exif_tag(entry_bits, current_entry, total_segment_count)
+
+  let data_type =
+    entry_bits
+    |> result.try(bit_array.slice(_, 2, 2))
+    |> result.map(utils.bit_array_to_decimal)
+    |> result.try(dict.get(exif_type_map(), _))
+
+  let component_count =
+    entry_bits
+    |> result.try(bit_array.slice(_, 4, 4))
+    |> result.map(utils.bit_array_to_decimal)
+
+  let data =
+    entry_bits
+    |> result.try(bit_array.slice(_, 8, 4))
+    |> result.try(parse_data_or_offset(
+      _,
+      segment_bytes,
+      data_type,
+      result.unwrap(component_count, 0),
+    ))
+
+  // Base cases
+  let base_element = case tag, data_type, component_count, data {
+    // base case: done with ExifOffset segment
+    EndOfLink, _, _, _ -> {
+      []
+    }
+    // base case: hit the end of the current IFD
+    EndOfIFD, _, _, _ -> {
+      []
+    }
+    t, Ok(data_type), Ok(component_count), Ok(data) -> {
+      [
+        Ok(RawExifEntry(
+          tag: t,
+          data_type: data_type,
+          component_count: component_count,
+          data: data,
+        )),
+      ]
+    }
+    _, _, _, _ -> {
+      []
+    }
+  }
+
+  // Recursive cases
+  case tag, data_type, component_count, data {
+    // In the case we hit the ExifOffset, this points us to a different offset location
+    // to start parsing out more
+    ExifOffset, _, _, Ok(data)
+    -> {
+      let offset = utils.bit_array_to_decimal(data)
+      let entry_count =
+        bit_array.slice(segment_bytes, offset, 2)
+        |> result.unwrap(<<0, 0>>)
+        |> utils.bit_array_to_decimal
+      // first 2 bytes is the number of elements.
+      get_raw_entries(segment_bytes, offset + 2, entry_count, 1)
+    }
+    // link off to the next IFD
+    IFDLink(offset), _, _, _ -> {
+      let entry_count =
+        bit_array.slice(segment_bytes, offset, 2)
+        |> result.unwrap(<<0, 0>>)
+        |> utils.bit_array_to_decimal
+      get_raw_entries(segment_bytes, offset + 2, entry_count, 1)
+    }
+    _, _, _, _ if current_entry <= total_segment_count -> {
+      list.append(
+        base_element,
+        get_raw_entries(
+          segment_bytes,
+          start + 12,
+          total_segment_count,
+          current_entry + 1,
+        ),
+      )
+    }
+    _, _, _, _ -> {
+      []
+    }
+  }
+}
+
+/// Takes the entry and tries to map it to a known RawExifTag
+fn parse_raw_exif_tag(
+  entry: Result(BitArray, Nil),
+  current_entry_count: Int,
+  total_segment_count: Int,
+) -> RawExifTag {
+  entry
+  |> result.try(bit_array.slice(_, 0, 2))
+  |> result.try(dict.get(exif_tag_map(), _))
+  // if we hit a terminating entry
+  |> result.try_recover(fn(_) {
+    case entry {
+      Ok(<<0x00, 0x00, 0x00, 0x00, _rest:bits>>)
+        if current_entry_count == total_segment_count
+      -> {
+        Ok(EndOfLink)
+      }
+      _ -> Error(Nil)
+    }
+  })
+  // if we look one past the last entry to see if we are done or 
+  // if we are swept off to a new IFD with an offset
+  |> result.try_recover(fn(_) {
+    case current_entry_count, total_segment_count {
+      c, t if c > t -> {
+        case bit_array.slice(result.unwrap(entry, <<>>), 0, 4) {
+          Ok(<<0, 0, 0, 0>>) -> {
+            Ok(EndOfIFD)
+          }
+          Ok(offset_bits) -> {
+            let offset = utils.bit_array_to_decimal(offset_bits)
+            Ok(IFDLink(offset))
+          }
+          _ -> Error(Nil)
+        }
+      }
+      _, _ -> Error(Nil)
+    }
+  })
+  |> result.unwrap(
+    UnknownExifTag(bit_array.base16_encode(result.unwrap(entry, <<>>))),
+  )
+}
+
+pub fn raw_exif_entry_to_parsed_tag(entry: RawExifEntry) -> exif_tag.ExifTag {
+  case entry.tag {
+    Make ->
+      entry.data
+      |> utils.trim_zero_bits
+      |> bit_array.to_string
+      |> result.unwrap("[[ERROR]]")
+      |> exif_tag.Make
+
+    Model ->
+      entry.data
+      |> utils.trim_zero_bits
+      |> bit_array.to_string
+      |> result.unwrap("[[ERROR]]")
+      |> exif_tag.Model
+
+    _ -> exif_tag.Unknown
+  }
+}
+
+fn exif_type_map() {
+  // lookup map from the decimal value to the type. The type holds the number of bytes per entry
+  dict.from_list([
+    #(1, UnsignedByte(1)),
+    #(2, AsciiString(1)),
+    #(3, UnsignedShort(2)),
+    #(4, UnsignedLong(4)),
+    #(5, UnsignedRational(8)),
+    #(6, SignedByte(1)),
+    #(7, Undefined(1)),
+    #(8, SignedShort(2)),
+    #(9, SignedLong(4)),
+    #(10, SignedRational(8)),
+    #(11, SingleFloat(4)),
+    #(12, DoubleFloat(8)),
+  ])
+}
+
+fn exif_tag_map() {
+  // lookup map from the bit array of the tag to its named type
+  dict.from_list([
+    #(<<0x01, 0x0f>>, Make),
+    #(<<0x01, 0x10>>, Model),
+    #(<<0x01, 0x12>>, Orientation),
+    #(<<0x01, 0x1a>>, XResolution),
+    #(<<0x01, 0x1b>>, YResolution),
+    #(<<0x01, 0x28>>, ResolutionUnit),
+    #(<<0x01, 0x31>>, Software),
+    #(<<0x01, 0x32>>, ModifyDate),
+    #(<<0x01, 0x3c>>, HostComputer),
+    #(<<0x02, 0x13>>, YCbCrPositioning),
+    // Special doodle
+    #(<<0x87, 0x69>>, ExifOffset),
+    #(<<0x82, 0x9a>>, ExposureTime),
+    #(<<0x82, 0x9d>>, FNumber),
+    #(<<0x88, 0x22>>, ExposureProgram),
+    #(<<0x88, 0x27>>, ISO),
+    #(<<0x90, 0x00>>, ExifVersion),
+    #(<<0x90, 0x03>>, DateTimeOriginal),
+    #(<<0x90, 0x04>>, CreateDate),
+    #(<<0x90, 0x10>>, OffsetTime),
+    #(<<0x90, 0x11>>, OffsetTimeOriginal),
+    #(<<0x90, 0x12>>, OffsetTimeDigitized),
+    #(<<0x91, 0x01>>, ComponentsConfiguration),
+    #(<<0x92, 0x01>>, ShutterSpeedValue),
+    #(<<0x92, 0x02>>, ApertureValue),
+  ])
+}
+
+fn parse_data_or_offset(
+  data_or_offset: BitArray,
+  full_segment: BitArray,
+  data_type: Result(RawExifType, Nil),
+  component_count: Int,
+) -> Result(BitArray, Nil) {
+  let dt = result.unwrap(data_type, Unknown(0))
+
+  case data_or_offset, dt {
+    _, Unknown(_) -> Error(Nil)
+    d, _ as t -> {
+      let size = t.bytes * component_count
+      let offset = utils.bit_array_to_decimal(data_or_offset)
+      case t.bytes {
+        // data is in the array already
+        _bytes if size <= 4 -> Ok(d)
+        //otherwise it contains the offset
+        _ -> bit_array.slice(full_segment, offset, size)
+      }
+    }
+  }
+}

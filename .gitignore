@@ -1,0 +1,7 @@
+*.beam
+*.ez
+/build
+erl_crash.dump
+
+# because I'm a silly JS guy that doesn't know other file watchers 
+nodemon.json
