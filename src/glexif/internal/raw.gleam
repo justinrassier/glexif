@@ -2,6 +2,7 @@ import file_streams/read_stream.{type ReadStream}
 import file_streams/read_stream_error.{type ReadStreamError}
 import gleam/bit_array
 import gleam/dict
+import gleam/io
 import gleam/list
 import gleam/result
 import glexif/exif_tag
@@ -246,8 +247,7 @@ pub fn get_raw_entries(
   case tag, data_type, component_count, data {
     // In the case we hit the ExifOffset, this points us to a different offset location
     // to start parsing out more
-    ExifOffset, _, _, Ok(data)
-    -> {
+    ExifOffset, _, _, Ok(data) -> {
       let offset = utils.bit_array_to_decimal(data)
       let entry_count =
         bit_array.slice(segment_bytes, offset, 2)
@@ -325,24 +325,79 @@ fn parse_raw_exif_tag(
   )
 }
 
+/// Convert the sub-optimal raw partially parsed entry into
+/// the final consumable tag
 pub fn raw_exif_entry_to_parsed_tag(entry: RawExifEntry) -> exif_tag.ExifTag {
   case entry.tag {
     Make ->
       entry.data
-      |> utils.trim_zero_bits
-      |> bit_array.to_string
-      |> result.unwrap("[[ERROR]]")
+      |> extract_ascii_data
       |> exif_tag.Make
 
     Model ->
       entry.data
-      |> utils.trim_zero_bits
-      |> bit_array.to_string
-      |> result.unwrap("[[ERROR]]")
+      |> extract_ascii_data
       |> exif_tag.Model
 
-    _ -> exif_tag.Unknown
+    Orientation ->
+      entry
+      |> extract_integer_data
+      |> dict.get(exif_orientation_map(), _)
+      |> result.unwrap(exif_tag.InvalidOrientation)
+      |> exif_tag.Orientation
+
+    XResolution -> exif_tag.XResolution(extract_integer_data(entry))
+    YResolution -> exif_tag.YResolution(extract_integer_data(entry))
+    ResolutionUnit -> {
+      case extract_integer_data(entry) {
+        1 -> exif_tag.ResolutionUnit(exif_tag.None)
+        2 -> exif_tag.ResolutionUnit(exif_tag.Inches)
+        3 -> exif_tag.ResolutionUnit(exif_tag.Centimeters)
+        _ -> exif_tag.ResolutionUnit(exif_tag.InvalidResolutionUnit)
+      }
+    }
+    Software ->
+      entry.data
+      |> extract_ascii_data
+      |> exif_tag.Software
+
+    ModifyDate ->
+      entry.data
+      |> extract_ascii_data
+      |> exif_tag.ModifyDate
+
+    HostComputer ->
+      entry.data
+      |> extract_ascii_data
+      |> exif_tag.HostComputer
+
+    YCbCrPositioning -> {
+      case extract_integer_data(entry) {
+        1 -> exif_tag.YCbCrPositioning(exif_tag.Centered)
+        2 -> exif_tag.YCbCrPositioning(exif_tag.CoSited)
+        _ -> exif_tag.YCbCrPositioning(exif_tag.InvalidYCbCrPositioning)
+      }
+    }
+    ExposureTime ->
+      exif_tag.ExposureTime(extract_unsigned_integer_to_fraction(entry.data))
+
+    _ -> {
+      exif_tag.Unknown
+    }
   }
+}
+
+fn exif_orientation_map() {
+  dict.from_list([
+    #(1, exif_tag.Horizontal),
+    #(2, exif_tag.MirrorHorizontal),
+    #(3, exif_tag.Rotate180),
+    #(4, exif_tag.MirrorVertical),
+    #(5, exif_tag.MirrorHorizontalAndRotate270CW),
+    #(6, exif_tag.Rotate90CW),
+    #(7, exif_tag.MirrorHorizontalAndRotate90CW),
+    #(8, exif_tag.Rotate270CW),
+  ])
 }
 
 fn exif_type_map() {
@@ -363,6 +418,54 @@ fn exif_type_map() {
   ])
 }
 
+fn extract_ascii_data(data: BitArray) -> String {
+  data
+  |> utils.trim_zero_bits
+  |> bit_array.to_string
+  |> result.unwrap("[[ERROR]]")
+}
+
+/// Take the bit array types that need to be converted to some sort
+/// of decimal and convert them
+fn extract_integer_data(exif_entry: RawExifEntry) -> Int {
+  case exif_entry.data_type {
+    UnsignedShort(size) ->
+      bit_array.slice(exif_entry.data, 0, size * exif_entry.component_count)
+      |> result.unwrap(<<>>)
+      |> utils.bit_array_to_decimal
+    UnsignedRational(_) -> {
+      let numerator =
+        exif_entry.data
+        |> bit_array.slice(0, 4)
+        |> result.map(utils.bit_array_to_decimal)
+        |> result.unwrap(0)
+      let denominator =
+        exif_entry.data
+        |> bit_array.slice(4, 4)
+        |> result.map(utils.bit_array_to_decimal)
+        |> result.unwrap(0)
+
+      numerator / denominator
+    }
+    _ -> todo as "unimplemented data type"
+  }
+}
+
+fn extract_unsigned_integer_to_fraction(data: BitArray) -> exif_tag.Fraction {
+  let numerator =
+    data
+    |> bit_array.slice(0, 4)
+    |> result.map(utils.bit_array_to_decimal)
+    |> result.unwrap(0)
+  let denominator =
+    data
+    |> bit_array.slice(4, 4)
+    |> result.map(utils.bit_array_to_decimal)
+    |> result.unwrap(0)
+
+  exif_tag.Fraction(numerator, denominator)
+}
+
 fn exif_tag_map() {
   // lookup map from the bit array of the tag to its named type
   dict.from_list([
@@ -376,8 +479,6 @@ fn exif_tag_map() {
     #(<<0x01, 0x32>>, ModifyDate),
     #(<<0x01, 0x3c>>, HostComputer),
     #(<<0x02, 0x13>>, YCbCrPositioning),
-    // Special doodle
-    #(<<0x87, 0x69>>, ExifOffset),
     #(<<0x82, 0x9a>>, ExposureTime),
     #(<<0x82, 0x9d>>, FNumber),
     #(<<0x88, 0x22>>, ExposureProgram),
@@ -391,6 +492,8 @@ fn exif_tag_map() {
     #(<<0x91, 0x01>>, ComponentsConfiguration),
     #(<<0x92, 0x01>>, ShutterSpeedValue),
     #(<<0x92, 0x02>>, ApertureValue),
+    // Special raw tag to signify an offset to recurse to
+    #(<<0x87, 0x69>>, ExifOffset),
   ])
 }
 
