@@ -2,6 +2,8 @@ import file_streams/read_stream.{type ReadStream}
 import file_streams/read_stream_error.{type ReadStreamError}
 import gleam/bit_array
 import gleam/dict
+import gleam/float
+import gleam/int
 import gleam/io
 import gleam/list
 import gleam/result
@@ -74,6 +76,7 @@ pub type RawExifTag {
   ComponentsConfiguration
   ShutterSpeedValue
   ApertureValue
+  BrightnessValue
 
   IFDLink(Int)
   EndOfLink
@@ -436,7 +439,16 @@ pub fn raw_exif_entry_to_parsed_tag(entry: RawExifEntry) -> exif_tag.ExifTag {
       exif_tag.ShutterSpeedValue(extract_signed_rational_to_fraction(entry.data))
 
     ApertureValue ->
-      exif_tag.AperatureValue(extract_unsigned_rational_to_fraction(entry.data))
+      exif_tag.ApertureValue(extract_unsigned_rational_to_fraction(entry.data))
+
+    BrightnessValue -> {
+      let exif_tag.Fraction(numerator, denominator) =
+        extract_unsigned_rational_to_fraction(entry.data)
+      // exif_tag.BrightnessValue(float)
+      exif_tag.BrightnessValue(
+        int.to_float(numerator) /. int.to_float(denominator),
+      )
+    }
 
     _ -> {
       exif_tag.Unknown
@@ -585,6 +597,7 @@ fn exif_tag_map() {
     #(<<0x91, 0x01>>, ComponentsConfiguration),
     #(<<0x92, 0x01>>, ShutterSpeedValue),
     #(<<0x92, 0x02>>, ApertureValue),
+    #(<<0x92, 0x03>>, BrightnessValue),
     // Special raw tag to signify an offset to recurse to
     #(<<0x87, 0x69>>, ExifOffset),
   ])

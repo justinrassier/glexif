@@ -21,7 +21,8 @@ pub type ExifTag {
   OffsetTimeDigitized(String)
   ComponentsConfiguration(List(ComponentsConfiguration))
   ShutterSpeedValue(Fraction)
-  AperatureValue(Fraction)
+  ApertureValue(Fraction)
+  BrightnessValue(Float)
 
   Unknown
 }
