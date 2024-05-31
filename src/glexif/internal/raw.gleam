@@ -432,10 +432,11 @@ pub fn raw_exif_entry_to_parsed_tag(entry: RawExifEntry) -> exif_tag.ExifTag {
       })
       |> exif_tag.ComponentsConfiguration
 
-    ShutterSpeedValue -> {
-      io.debug(entry)
+    ShutterSpeedValue ->
       exif_tag.ShutterSpeedValue(extract_signed_rational_to_fraction(entry.data))
-    }
+
+    ApertureValue ->
+      exif_tag.AperatureValue(extract_unsigned_rational_to_fraction(entry.data))
 
     _ -> {
       exif_tag.Unknown

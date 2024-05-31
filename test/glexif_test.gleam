@@ -11,7 +11,7 @@ pub fn main() {
 
 pub fn full_test() {
   glexif.get_exif_data_for_file("test/fixtures/test.jpeg")
-  |> list.take(22)
+  |> list.take(23)
   |> should.equal([
     exif_tag.Make("Apple"),
     exif_tag.Model("iPhone 14 Pro"),
@@ -41,5 +41,7 @@ pub fn full_test() {
     ]),
     // TODO: convert this to seconds instead of the raw fraction
     exif_tag.ShutterSpeedValue(exif_tag.Fraction(124_929, 16_690)),
+    // TODO: convert this to the human readable value that it should be
+    exif_tag.AperatureValue(exif_tag.Fraction(163_775, 98_437)),
   ])
 }
