@@ -11,7 +11,7 @@ pub fn main() {
 
 pub fn full_test() {
   glexif.get_exif_data_for_file("test/fixtures/test.jpeg")
-  |> list.take(11)
+  |> list.take(22)
   |> should.equal([
     exif_tag.Make("Apple"),
     exif_tag.Model("iPhone 14 Pro"),
@@ -24,5 +24,22 @@ pub fn full_test() {
     exif_tag.HostComputer("iPhone 14 Pro"),
     exif_tag.YCbCrPositioning(exif_tag.Centered),
     exif_tag.ExposureTime(exif_tag.Fraction(1, 179)),
+    exif_tag.FNumber(exif_tag.Fraction(89, 50)),
+    exif_tag.ExposureProgram(exif_tag.ProgramAE),
+    exif_tag.ISO(64),
+    exif_tag.ExifVersion("0232"),
+    exif_tag.DateTimeOriginal("2024:02:18 17:34:57"),
+    exif_tag.CreateDate("2024:02:18 17:34:57"),
+    exif_tag.OffsetTime("-06:00"),
+    exif_tag.OffsetTimeOriginal("-06:00"),
+    exif_tag.OffsetTimeDigitized("-06:00"),
+    exif_tag.ComponentsConfiguration([
+      exif_tag.Y,
+      exif_tag.Cb,
+      exif_tag.Cr,
+      exif_tag.NA,
+    ]),
+    // TODO: convert this to seconds instead of the raw fraction
+    exif_tag.ShutterSpeedValue(exif_tag.Fraction(124_929, 16_690)),
   ])
 }

@@ -5,6 +5,7 @@ import gleam/dict
 import gleam/io
 import gleam/list
 import gleam/result
+import gleam/string
 import glexif/exif_tag
 import glexif/internal/utils
 
@@ -379,11 +380,75 @@ pub fn raw_exif_entry_to_parsed_tag(entry: RawExifEntry) -> exif_tag.ExifTag {
       }
     }
     ExposureTime ->
-      exif_tag.ExposureTime(extract_unsigned_integer_to_fraction(entry.data))
+      exif_tag.ExposureTime(extract_unsigned_rational_to_fraction(entry.data))
+
+    FNumber ->
+      exif_tag.FNumber(extract_unsigned_rational_to_fraction(entry.data))
+
+    ExposureProgram ->
+      case extract_integer_data(entry) {
+        0 -> exif_tag.ExposureProgram(exif_tag.NotDefined)
+        1 -> exif_tag.ExposureProgram(exif_tag.Manual)
+        2 -> exif_tag.ExposureProgram(exif_tag.ProgramAE)
+        3 -> exif_tag.ExposureProgram(exif_tag.AperturePriorityAE)
+        4 -> exif_tag.ExposureProgram(exif_tag.ShutterSpeedPriorityAE)
+        5 -> exif_tag.ExposureProgram(exif_tag.Creative)
+        6 -> exif_tag.ExposureProgram(exif_tag.Action)
+        7 -> exif_tag.ExposureProgram(exif_tag.Portrait)
+        8 -> exif_tag.ExposureProgram(exif_tag.Landscape)
+        _ -> exif_tag.ExposureProgram(exif_tag.InvalidExposureProgram)
+      }
+
+    ISO -> exif_tag.ISO(extract_integer_data(entry))
+
+    ExifVersion -> exif_tag.ExifVersion(extract_ascii_data(entry.data))
+
+    DateTimeOriginal ->
+      exif_tag.DateTimeOriginal(extract_ascii_data(entry.data))
+
+    CreateDate -> exif_tag.CreateDate(extract_ascii_data(entry.data))
+
+    OffsetTime -> exif_tag.OffsetTime(extract_ascii_data(entry.data))
+
+    OffsetTimeOriginal ->
+      exif_tag.OffsetTimeOriginal(extract_ascii_data(entry.data))
+
+    OffsetTimeDigitized ->
+      exif_tag.OffsetTimeDigitized(extract_ascii_data(entry.data))
+
+    ComponentsConfiguration ->
+      bit_array_to_decimal_list(entry.data)
+      |> list.map(fn(v) {
+        case v {
+          0 -> exif_tag.NA
+          1 -> exif_tag.Y
+          2 -> exif_tag.Cb
+          3 -> exif_tag.Cr
+          4 -> exif_tag.R
+          5 -> exif_tag.G
+          6 -> exif_tag.B
+          _ -> exif_tag.InvalidComponentsConfiguration
+        }
+      })
+      |> exif_tag.ComponentsConfiguration
+
+    ShutterSpeedValue -> {
+      io.debug(entry)
+      exif_tag.ShutterSpeedValue(extract_signed_rational_to_fraction(entry.data))
+    }
 
     _ -> {
       exif_tag.Unknown
     }
+  }
+}
+
+fn bit_array_to_decimal_list(b: BitArray) -> List(Int) {
+  case b {
+    <<i, rest:bits>> -> {
+      [i, ..bit_array_to_decimal_list(rest)]
+    }
+    _ -> []
   }
 }
 
@@ -451,7 +516,34 @@ fn extract_integer_data(exif_entry: RawExifEntry) -> Int {
   }
 }
 
-fn extract_unsigned_integer_to_fraction(data: BitArray) -> exif_tag.Fraction {
+fn extract_unsigned_rational_to_fraction(data: BitArray) -> exif_tag.Fraction {
+  let numerator =
+    data
+    |> bit_array.slice(0, 4)
+    |> result.map(utils.bit_array_to_decimal)
+    |> result.unwrap(0)
+  let denominator =
+    data
+    |> bit_array.slice(4, 4)
+    |> result.map(utils.bit_array_to_decimal)
+    |> result.unwrap(0)
+
+  exif_tag.Fraction(numerator, denominator)
+}
+
+fn extract_signed_rational_to_fraction(data: BitArray) -> exif_tag.Fraction {
+  let assert Ok(signed) = bit_array.base16_encode(data) |> string.first
+
+  // TODO: I don't remember this stuff anymore! Ugh I feel ashamed
+  case signed {
+    "0" -> signed
+    "1" ->
+      todo as "re-learn how the heck to work with signed binary stuff again"
+    _ -> panic as "wut?"
+  }
+
+  // TODO: For now just treat as unsigned rational since my 
+  // test data has this as positive values
   let numerator =
     data
     |> bit_array.slice(0, 4)
