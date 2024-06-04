@@ -77,6 +77,9 @@ pub type RawExifTag {
   ShutterSpeedValue
   ApertureValue
   BrightnessValue
+  ExposureCompensation
+  MeteringMode
+  Flash
 
   IFDLink(Int)
   EndOfLink
@@ -444,11 +447,37 @@ pub fn raw_exif_entry_to_parsed_tag(entry: RawExifEntry) -> exif_tag.ExifTag {
     BrightnessValue -> {
       let exif_tag.Fraction(numerator, denominator) =
         extract_unsigned_rational_to_fraction(entry.data)
-      // exif_tag.BrightnessValue(float)
       exif_tag.BrightnessValue(
         int.to_float(numerator) /. int.to_float(denominator),
       )
     }
+
+    ExposureCompensation ->
+      exif_tag.ExposureCompensation(extract_unsigned_rational_to_fraction(
+        entry.data,
+      ))
+
+    MeteringMode ->
+      {
+        case extract_integer_data(entry) {
+          0 -> exif_tag.UnknownMeteringMode
+          1 -> exif_tag.Average
+          2 -> exif_tag.CenterWeightedAverage
+          3 -> exif_tag.Spot
+          4 -> exif_tag.MultiSpot
+          5 -> exif_tag.MultiSegement
+          6 -> exif_tag.Partial
+          255 -> exif_tag.Other
+          _ -> exif_tag.InvalidMeteringMode
+        }
+      }
+      |> exif_tag.MeteringMode
+
+    Flash ->
+      bit_array.slice(entry.data, 0, 2)
+      |> result.try(dict.get(flash_tag_map(), _))
+      |> result.unwrap(exif_tag.InvalidFlash)
+      |> exif_tag.Flash
 
     _ -> {
       exif_tag.Unknown
@@ -525,7 +554,7 @@ fn extract_integer_data(exif_entry: RawExifEntry) -> Int {
 
       numerator / denominator
     }
-    _ -> todo as "unimplemented data type"
+    _ -> panic as "unimplemented data type"
   }
 }
 
@@ -598,6 +627,10 @@ fn exif_tag_map() {
     #(<<0x92, 0x01>>, ShutterSpeedValue),
     #(<<0x92, 0x02>>, ApertureValue),
     #(<<0x92, 0x03>>, BrightnessValue),
+    #(<<0x92, 0x04>>, ExposureCompensation),
+    #(<<0x92, 0x07>>, MeteringMode),
+    #(<<0x92, 0x07>>, MeteringMode),
+    #(<<0x92, 0x09>>, Flash),
     // Special raw tag to signify an offset to recurse to
     #(<<0x87, 0x69>>, ExifOffset),
   ])
@@ -624,4 +657,36 @@ fn parse_data_or_offset(
       }
     }
   }
+}
+
+fn flash_tag_map() {
+  dict.from_list([
+    #(<<0x00, 0x00>>, exif_tag.NoFlash),
+    #(<<0x00, 0x01>>, exif_tag.Fired),
+    #(<<0x00, 0x05>>, exif_tag.FiredReturnNotDetected),
+    #(<<0x00, 0x07>>, exif_tag.FiredReturnDetected),
+    #(<<0x00, 0x08>>, exif_tag.OnDidNotFire),
+    #(<<0x00, 0x09>>, exif_tag.OnFired),
+    #(<<0x00, 0x0d>>, exif_tag.OnReturnNotDetected),
+    #(<<0x00, 0x0f>>, exif_tag.OnReturnDetected),
+    #(<<0x00, 0x10>>, exif_tag.OffDidNotFire),
+    #(<<0x00, 0x14>>, exif_tag.OffDidNotFireReturnNotDetected),
+    #(<<0x00, 0x18>>, exif_tag.AutoDidNotFire),
+    #(<<0x00, 0x19>>, exif_tag.AutoFired),
+    #(<<0x00, 0x1d>>, exif_tag.AutoFiredReturnNotDetected),
+    #(<<0x00, 0x1f>>, exif_tag.AutoFiredReturnDetected),
+    #(<<0x00, 0x20>>, exif_tag.NoFlashFunction),
+    #(<<0x00, 0x30>>, exif_tag.OffNoFlashFunction),
+    #(<<0x00, 0x41>>, exif_tag.FiredRedEyeReduction),
+    #(<<0x00, 0x45>>, exif_tag.FiredRedEyeReductionReturnNotDetected),
+    #(<<0x00, 0x47>>, exif_tag.FiredRedEyeReductionReturnDetected),
+    #(<<0x00, 0x49>>, exif_tag.OnRedEyeReduction),
+    #(<<0x00, 0x4d>>, exif_tag.OnRedEyeReductionReturnNotDetected),
+    #(<<0x00, 0x4f>>, exif_tag.OnRedEyeReductionReturnDetected),
+    #(<<0x00, 0x50>>, exif_tag.OffRedEyeReduction),
+    #(<<0x00, 0x58>>, exif_tag.AutoDidNotFireRedEyeReduction),
+    #(<<0x00, 0x59>>, exif_tag.AutoFiredRedEyeReduction),
+    #(<<0x00, 0x5d>>, exif_tag.AutoFiredRedEyeReductionReturnNotDetected),
+    #(<<0x00, 0x5f>>, exif_tag.AutoFiredRedEyeReductionReturnDetected),
+  ])
 }

@@ -1,4 +1,3 @@
-import gleam/io
 import gleam/list
 import gleeunit
 import gleeunit/should
@@ -11,7 +10,7 @@ pub fn main() {
 
 pub fn full_test() {
   glexif.get_exif_data_for_file("test/fixtures/test.jpeg")
-  |> list.take(24)
+  |> list.take(27)
   |> should.equal([
     exif_tag.Make("Apple"),
     exif_tag.Model("iPhone 14 Pro"),
@@ -44,5 +43,8 @@ pub fn full_test() {
     // TODO: convert this to the human readable value that it should be
     exif_tag.ApertureValue(exif_tag.Fraction(163_775, 98_437)),
     exif_tag.BrightnessValue(5.389648033126294),
+    exif_tag.ExposureCompensation(exif_tag.Fraction(0, 1)),
+    exif_tag.MeteringMode(exif_tag.MultiSegement),
+    exif_tag.Flash(exif_tag.OffDidNotFire),
   ])
 }
