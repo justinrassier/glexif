@@ -1,0 +1,178 @@
+ExifTool Version Number         : 12.84
+File Name                       : test.jpeg
+Directory                       : .
+File Size                       : 3.5 MB
+File Modification Date/Time     : 2024:04:30 20:04:37-05:00
+File Access Date/Time           : 2024:05:24 14:05:19-05:00
+File Inode Change Date/Time     : 2024:04:30 20:04:37-05:00
+File Permissions                : -rw-r--r--
+File Type                       : JPEG
+File Type Extension             : jpg
+MIME Type                       : image/jpeg
+JFIF Version                    : 1.01
+Exif Byte Order                 : Big-endian (Motorola, MM)
+Make                            : Apple
+Camera Model Name               : iPhone 14 Pro
+Orientation                     : Rotate 90 CW
+X Resolution                    : 72
+Y Resolution                    : 72
+Resolution Unit                 : inches
+Software                        : 17.2.1
+Modify Date                     : 2024:02:18 17:34:57
+Host Computer                   : iPhone 14 Pro
+Y Cb Cr Positioning             : Centered
+Exposure Time                   : 1/179
+F Number                        : 1.8
+Exposure Program                : Program AE
+ISO                             : 64
+Exif Version                    : 0232
+Date/Time Original              : 2024:02:18 17:34:57
+Create Date                     : 2024:02:18 17:34:57
+Offset Time                     : -06:00
+Offset Time Original            : -06:00
+Offset Time Digitized           : -06:00
+Components Configuration        : Y, Cb, Cr, -
+Shutter Speed Value             : 1/179
+Aperture Value                  : 1.8
+Brightness Value                : 5.389648033
+Exposure Compensation           : 0
+Metering Mode                   : Multi-segment
+Flash                           : Off, Did not fire
+Focal Length                    : 6.9 mm
+Subject Area                    : 2009 1505 2208 1324
+Maker Note Version              : 14
+Run Time Flags                  : Valid
+Run Time Value                  : 672958984270041
+Run Time Scale                  : 1000000000
+Run Time Epoch                  : 0
+AE Stable                       : Yes
+AE Target                       : 178
+AE Average                      : 186
+AF Stable                       : Yes
+Acceleration Vector             : 0.1118238569 -0.8555929065 0.4435048402
+Focus Distance Range            : 1.13 - 2.36 m
+Content Identifier              : 79B05A6F-B8A3-44A8-9388-76A83A1ABCFA
+Image Capture Type              : Photo (12)
+Live Photo Video Index          : 5251076
+Photos App Feature Flags        : 0
+HDR Headroom                    : 0.7470192909
+AF Performance                  : 738 1 44
+Signal To Noise Ratio           : 50.10843276
+Photo Identifier                : 837BE196-2D89-42F1-BF38-2EA0924B9E2F
+Color Temperature               : 7247
+Camera Type                     : Back Normal
+Focus Position                  : 51
+HDR Gain                        : 0
+AF Measured Depth               : 1071
+AF Confidence                   : 0
+Semantic Style                  : {_0=1,_1=-0.5,_2=0,_3=3}
+Sub Sec Time Original           : 289
+Sub Sec Time Digitized          : 289
+Flashpix Version                : 0100
+Color Space                     : Uncalibrated
+Exif Image Width                : 4032
+Exif Image Height               : 3024
+Sensing Method                  : One-chip color area
+Scene Type                      : Directly photographed
+Exposure Mode                   : Auto
+White Balance                   : Auto
+Focal Length In 35mm Format     : 24 mm
+Scene Capture Type              : Standard
+Lens Info                       : 2.220000029-9mm f/1.779999971-2.8
+Lens Make                       : Apple
+Lens Model                      : iPhone 14 Pro back triple camera 6.86mm f/1.78
+Composite Image                 : General Composite Image
+GPS Latitude Ref                : North
+GPS Longitude Ref               : West
+GPS Altitude Ref                : Above Sea Level
+GPS Time Stamp                  : 23:34:56
+GPS Speed Ref                   : km/h
+GPS Speed                       : 0
+GPS Img Direction Ref           : True North
+GPS Img Direction               : 189.629074
+GPS Dest Bearing Ref            : True North
+GPS Dest Bearing                : 189.629074
+GPS Date Stamp                  : 2024:02:18
+GPS Horizontal Positioning Error: 73.70449735 m
+Compression                     : JPEG (old-style)
+Thumbnail Offset                : 3140
+Thumbnail Length                : 9377
+XMP Toolkit                     : XMP Core 6.0.0
+Creator Tool                    : 17.2.1
+Date Created                    : 2024:02:18 17:34:57
+Region Area Y                   : 0.16749999999999998
+Region Area W                   : 0.026190476190476208
+Region Area X                   : 0.91852380952380952
+Region Area H                   : 0.035000000000000003
+Region Area Unit                : normalized
+Region Type                     : Face
+Region Extensions Angle Info Yaw: 11
+Region Extensions Angle Info Roll: 324
+Region Extensions Confidence Level: 1
+Region Extensions Face ID       : 3240
+Region Applied To Dimensions H  : 3024
+Region Applied To Dimensions W  : 4032
+Region Applied To Dimensions Unit: pixel
+MPF Version                     : 0100
+Number Of Images                : 2
+MP Image Flags                  : (none)
+MP Image Format                 : JPEG
+MP Image Type                   : Undefined
+MP Image Length                 : 379835
+MP Image Start                  : 3118977
+Dependent Image 1 Entry Number  : 0
+Dependent Image 2 Entry Number  : 0
+Profile CMM Type                : Apple Computer Inc.
+Profile Version                 : 4.0.0
+Profile Class                   : Display Device Profile
+Color Space Data                : RGB
+Profile Connection Space        : XYZ
+Profile Date Time               : 2022:01:01 00:00:00
+Profile File Signature          : acsp
+Primary Platform                : Apple Computer Inc.
+CMM Flags                       : Not Embedded, Independent
+Device Manufacturer             : Apple Computer Inc.
+Device Model                    : 
+Device Attributes               : Reflective, Glossy, Positive, Color
+Rendering Intent                : Perceptual
+Connection Space Illuminant     : 0.9642 1 0.82491
+Profile Creator                 : Apple Computer Inc.
+Profile ID                      : ecfda38e388547c36db4bd4f7ada182f
+Profile Description             : Display P3
+Profile Copyright               : Copyright Apple Inc., 2022
+Media White Point               : 0.96419 1 0.82489
+Red Matrix Column               : 0.51512 0.2412 -0.00105
+Green Matrix Column             : 0.29198 0.69225 0.04189
+Blue Matrix Column              : 0.1571 0.06657 0.78407
+Red Tone Reproduction Curve     : (Binary data 32 bytes, use -b option to extract)
+Chromatic Adaptation            : 1.04788 0.02292 -0.0502 0.02959 0.99048 -0.01706 -0.00923 0.01508 0.75168
+Blue Tone Reproduction Curve    : (Binary data 32 bytes, use -b option to extract)
+Green Tone Reproduction Curve   : (Binary data 32 bytes, use -b option to extract)
+Image Width                     : 4032
+Image Height                    : 3024
+Encoding Process                : Baseline DCT, Huffman coding
+Bits Per Sample                 : 8
+Color Components                : 3
+Y Cb Cr Sub Sampling            : YCbCr4:2:0 (2 2)
+Run Time Since Power Up         : 7 days 18:55:59
+Aperture                        : 1.8
+Image Size                      : 4032x3024
+Megapixels                      : 12.2
+Scale Factor To 35 mm Equivalent: 3.5
+Shutter Speed                   : 1/179
+Create Date                     : 2024:02:18 17:34:57.289-06:00
+Date/Time Original              : 2024:02:18 17:34:57.289-06:00
+Modify Date                     : 2024:02:18 17:34:57-06:00
+Thumbnail Image                 : (Binary data 9377 bytes, use -b option to extract)
+GPS Altitude                    : 245.9 m Above Sea Level
+GPS Date/Time                   : 2024:02:18 23:34:56Z
+GPS Latitude                    : 44 deg 58' 29.31" N
+GPS Longitude                   : 93 deg 15' 35.93" W
+MP Image 2                      : (Binary data 379835 bytes, use -b option to extract)
+Circle Of Confusion             : 0.009 mm
+Field Of View                   : 73.7 deg
+Focal Length                    : 6.9 mm (35 mm equivalent: 24.0 mm)
+GPS Position                    : 44 deg 58' 29.31" N, 93 deg 15' 35.93" W
+Hyperfocal Distance             : 3.08 m
+Light Value                     : 9.8
+Lens ID                         : iPhone 14 Pro back triple camera 6.86mm f/1.78

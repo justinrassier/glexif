@@ -88,7 +88,7 @@ pub type RawExifTag {
   FlashpixVersion
 
   IFDLink(Int)
-  EndOfLink
+  // EndOfLink
   // Paired with ExifOffset
   EndOfIFD
   // No more offset. End of everything
@@ -210,10 +210,10 @@ pub fn get_raw_entries(
 
   let tag = parse_raw_exif_tag(entry_bits, current_entry, total_segment_count)
 
-  io.debug(
-    int.to_string(current_entry) <> "/" <> int.to_string(total_segment_count),
-  )
-  io.debug(tag)
+  // io.debug(
+  //   int.to_string(current_entry) <> "/" <> int.to_string(total_segment_count),
+  // )
+  // io.debug(tag)
   let data_type =
     entry_bits
     |> result.try(bit_array.slice(_, 2, 2))
@@ -235,32 +235,6 @@ pub fn get_raw_entries(
       result.unwrap(component_count, 0),
     ))
 
-  // Base cases
-  let base_element = case tag, data_type, component_count, data {
-    // base case: done with ExifOffset segment
-    EndOfLink, _, _, _ -> {
-      []
-    }
-    // base case: hit the end of the current IFD
-    EndOfIFD, _, _, _ -> {
-      []
-    }
-    t, Ok(data_type), Ok(component_count), Ok(data) -> {
-      [
-        Ok(RawExifEntry(
-          tag: t,
-          data_type: data_type,
-          component_count: component_count,
-          data: data,
-        )),
-      ]
-    }
-    _, _, _, _ -> {
-      []
-    }
-  }
-
-  // Recursive cases
   case tag, data_type, component_count, data {
     // In the case we hit the ExifOffset, this points us to a different offset location
     // to start parsing out more
@@ -271,17 +245,52 @@ pub fn get_raw_entries(
         |> result.unwrap(<<0, 0>>)
         |> utils.bit_array_to_decimal
       // first 2 bytes is the number of elements.
-      get_raw_entries(segment_bytes, offset + 2, entry_count, 1)
+      list.append(
+        // recurse down the offset
+        get_raw_entries(segment_bytes, offset + 2, entry_count, 1),
+        // continue recursing the current segment
+        get_raw_entries(
+          segment_bytes,
+          start + 12,
+          total_segment_count,
+          current_entry + 1,
+        ),
+      )
     }
     // link off to the next IFD
     IFDLink(offset), _, _, _ -> {
+      // io.debug("exif offset?")
+      // io.debug(
+      //   int.to_string(current_entry)
+      //   <> "/"
+      //   <> int.to_string(total_segment_count),
+      // )
+      // io.debug(tag)
       let entry_count =
         bit_array.slice(segment_bytes, offset, 2)
         |> result.unwrap(<<0, 0>>)
         |> utils.bit_array_to_decimal
-      get_raw_entries(segment_bytes, offset + 2, entry_count, 1)
+      list.append(
+        get_raw_entries(segment_bytes, offset + 2, entry_count, 1),
+        get_raw_entries(
+          segment_bytes,
+          start + 12,
+          total_segment_count,
+          current_entry + 1,
+        ),
+      )
     }
-    _, _, _, _ if current_entry <= total_segment_count -> {
+    t, Ok(data_type), Ok(component_count), Ok(data)
+      if current_entry <= total_segment_count
+    -> {
+      let base_element = [
+        Ok(RawExifEntry(
+          tag: t,
+          data_type: data_type,
+          component_count: component_count,
+          data: data,
+        )),
+      ]
       list.append(
         base_element,
         get_raw_entries(
@@ -293,13 +302,13 @@ pub fn get_raw_entries(
       )
     }
     _, _, _, _ -> {
-      io.debug("here?")
-      io.debug(
-        int.to_string(current_entry)
-        <> "/"
-        <> int.to_string(total_segment_count),
-      )
-      io.debug(tag)
+      // io.debug("here?")
+      // io.debug(
+      //   int.to_string(current_entry)
+      //   <> "/"
+      //   <> int.to_string(total_segment_count),
+      // )
+      // io.debug(tag)
       []
     }
   }
@@ -311,28 +320,16 @@ fn parse_raw_exif_tag(
   current_entry_count: Int,
   total_segment_count: Int,
 ) -> RawExifTag {
+  // the one segment past the last segment is either offset to a new link or the end of things
+  let end_or_offset_index = total_segment_count + 1
   entry
   |> result.try(bit_array.slice(_, 0, 2))
   |> result.try(dict.get(exif_tag_map(), _))
-  // // if we hit a terminating entry
-  // |> result.try_recover(fn(_) {
-  //   case entry {
-  //     Ok(<<0x00, 0x00, 0x00, 0x00, _rest:bits>>) -> {
-  //       // if current_entry_count == total_segment_count
-  //       io.debug(current_entry_count)
-  //       io.debug(total_segment_count)
-  //       Ok(EndOfLink)
-  //     }
-  //     _ -> {
-  //       Error(Nil)
-  //     }
-  //   }
-  // })
-  // if we look one past the last entry to see if we are done or 
-  // if we are swept off to a new IFD with an offset
   |> result.try_recover(fn(_) {
     case current_entry_count, total_segment_count {
-      c, t if c > t -> {
+      // if we are one past the last entry, that will either be an offset
+      // to a new IFD or it will mark the end
+      c, _ if c == end_or_offset_index -> {
         case bit_array.slice(result.unwrap(entry, <<>>), 0, 4) {
           Ok(<<0, 0, 0, 0>>) -> {
             Ok(EndOfIFD)
@@ -343,6 +340,10 @@ fn parse_raw_exif_tag(
           }
           _ -> Error(Nil)
         }
+      }
+      // if we got past the last entry, which happens at the very end of recursion, we are done
+      c, _ if c > end_or_offset_index -> {
+        Ok(EndOfIFD)
       }
       _, _ -> Error(Nil)
     }
