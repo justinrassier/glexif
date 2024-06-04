@@ -10,7 +10,7 @@ pub fn main() {
 
 pub fn full_test() {
   glexif.get_exif_data_for_file("test/fixtures/test.jpeg")
-  |> list.take(27)
+  |> list.take(33)
   |> should.equal([
     exif_tag.Make("Apple"),
     exif_tag.Model("iPhone 14 Pro"),
@@ -46,5 +46,13 @@ pub fn full_test() {
     exif_tag.ExposureCompensation(exif_tag.Fraction(0, 1)),
     exif_tag.MeteringMode(exif_tag.MultiSegement),
     exif_tag.Flash(exif_tag.OffDidNotFire),
+    // TODO: Need units? Or is it always millimeters? ExifTool rounds to 1 decimal, should I do that too?
+    exif_tag.FocalLength(6.86),
+    exif_tag.SubjectArea([2009, 1505, 2208, 1324]),
+    // TODO: parse out maker data. This is a whole ball of wax and I'm kicking the can down the road
+    exif_tag.MakerData,
+    exif_tag.SubSecTimeOriginal("289"),
+    exif_tag.SubSecTimeDigitized("289"),
+    exif_tag.FlashpixVersion("0100"),
   ])
 }

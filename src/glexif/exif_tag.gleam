@@ -28,7 +28,12 @@ pub type ExifTag {
   ExposureCompensation(Fraction)
   MeteringMode(MeteringMode)
   Flash(Flash)
-
+  FocalLength(Float)
+  SubjectArea(List(Int))
+  MakerData
+  SubSecTimeOriginal(String)
+  SubSecTimeDigitized(String)
+  FlashpixVersion(String)
   Unknown
 }
 
@@ -187,8 +192,4 @@ pub type Flash {
   AutoFiredRedEyeReductionReturnNotDetected
   AutoFiredRedEyeReductionReturnDetected
   InvalidFlash
-}
-
-fn flash_tag_map() {
-  dict.from_list([#(<<0x00>>, NoFlash)])
 }

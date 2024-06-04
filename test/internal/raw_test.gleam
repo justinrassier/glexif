@@ -64,12 +64,15 @@ pub fn get_raw_entries_test() {
     raw_data: test_segment.test_jpeg_segment_raw_data,
   ))
 
+  // bit_array.base16_encode(test_segment.test_jpeg_segment_raw_data)
+  // |> should.equal("asdf")
+
   let entry_count =
     bit_array.slice(segment.raw_data, 8, 2)
     |> result.unwrap(<<0, 0>>)
     |> utils.bit_array_to_decimal
 
-  list.take(raw.get_raw_entries(segment.raw_data, 10, entry_count, 1), 27)
+  list.take(raw.get_raw_entries(segment.raw_data, 10, entry_count, 1), 33)
   |> should.equal([
     Ok(raw.RawExifEntry(raw.Make, raw.AsciiString(1), 6, <<"Apple":utf8, 0>>)),
     Ok(
@@ -186,6 +189,35 @@ pub fn get_raw_entries_test() {
       raw.RawExifEntry(raw.MeteringMode, raw.UnsignedShort(2), 1, <<0, 5, 0, 0>>),
     ),
     Ok(raw.RawExifEntry(raw.Flash, raw.UnsignedShort(2), 1, <<0, 16, 0, 0>>)),
+    Ok(
+      raw.RawExifEntry(raw.FocalLength, raw.UnsignedRational(8), 1, <<
+        0, 0, 1, 87, 0, 0, 0, 50,
+      >>),
+    ),
+    Ok(
+      raw.RawExifEntry(raw.SubjectArea, raw.UnsignedShort(2), 4, <<
+        7, 217, 5, 225, 8, 160, 5, 44,
+      >>),
+    ),
+    Ok(raw.RawExifEntry(
+      raw.MakerData,
+      raw.Undefined(1),
+      1813,
+      test_segment.test_maker_data,
+    )),
+    Ok(
+      raw.RawExifEntry(raw.SubSecTimeOriginal, raw.AsciiString(1), 4, <<
+        "289":utf8, 0,
+      >>),
+    ),
+    Ok(
+      raw.RawExifEntry(raw.SubSecTimeDigitized, raw.AsciiString(1), 4, <<
+        "289":utf8, 0,
+      >>),
+    ),
+    Ok(
+      raw.RawExifEntry(raw.FlashpixVersion, raw.Undefined(1), 4, <<"0100":utf8>>),
+    ),
   ])
 }
 

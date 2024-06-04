@@ -80,6 +80,12 @@ pub type RawExifTag {
   ExposureCompensation
   MeteringMode
   Flash
+  FocalLength
+  SubjectArea
+  MakerData
+  SubSecTimeOriginal
+  SubSecTimeDigitized
+  FlashpixVersion
 
   IFDLink(Int)
   EndOfLink
@@ -204,6 +210,10 @@ pub fn get_raw_entries(
 
   let tag = parse_raw_exif_tag(entry_bits, current_entry, total_segment_count)
 
+  io.debug(
+    int.to_string(current_entry) <> "/" <> int.to_string(total_segment_count),
+  )
+  io.debug(tag)
   let data_type =
     entry_bits
     |> result.try(bit_array.slice(_, 2, 2))
@@ -283,6 +293,13 @@ pub fn get_raw_entries(
       )
     }
     _, _, _, _ -> {
+      io.debug("here?")
+      io.debug(
+        int.to_string(current_entry)
+        <> "/"
+        <> int.to_string(total_segment_count),
+      )
+      io.debug(tag)
       []
     }
   }
@@ -297,17 +314,20 @@ fn parse_raw_exif_tag(
   entry
   |> result.try(bit_array.slice(_, 0, 2))
   |> result.try(dict.get(exif_tag_map(), _))
-  // if we hit a terminating entry
-  |> result.try_recover(fn(_) {
-    case entry {
-      Ok(<<0x00, 0x00, 0x00, 0x00, _rest:bits>>)
-        if current_entry_count == total_segment_count
-      -> {
-        Ok(EndOfLink)
-      }
-      _ -> Error(Nil)
-    }
-  })
+  // // if we hit a terminating entry
+  // |> result.try_recover(fn(_) {
+  //   case entry {
+  //     Ok(<<0x00, 0x00, 0x00, 0x00, _rest:bits>>) -> {
+  //       // if current_entry_count == total_segment_count
+  //       io.debug(current_entry_count)
+  //       io.debug(total_segment_count)
+  //       Ok(EndOfLink)
+  //     }
+  //     _ -> {
+  //       Error(Nil)
+  //     }
+  //   }
+  // })
   // if we look one past the last entry to see if we are done or 
   // if we are swept off to a new IFD with an offset
   |> result.try_recover(fn(_) {
@@ -479,6 +499,27 @@ pub fn raw_exif_entry_to_parsed_tag(entry: RawExifEntry) -> exif_tag.ExifTag {
       |> result.unwrap(exif_tag.InvalidFlash)
       |> exif_tag.Flash
 
+    FocalLength -> {
+      let exif_tag.Fraction(numerator, denominator) =
+        extract_unsigned_rational_to_fraction(entry.data)
+      exif_tag.FocalLength(int.to_float(numerator) /. int.to_float(denominator))
+    }
+
+    SubjectArea -> {
+      extract_unsigned_short_to_int_list(entry.data, entry.component_count, 0)
+      |> exif_tag.SubjectArea
+    }
+
+    MakerData -> exif_tag.MakerData
+
+    SubSecTimeOriginal ->
+      exif_tag.SubSecTimeOriginal(extract_ascii_data(entry.data))
+
+    SubSecTimeDigitized ->
+      exif_tag.SubSecTimeDigitized(extract_ascii_data(entry.data))
+
+    FlashpixVersion -> exif_tag.FlashpixVersion(extract_ascii_data(entry.data))
+
     _ -> {
       exif_tag.Unknown
     }
@@ -489,6 +530,19 @@ fn bit_array_to_decimal_list(b: BitArray) -> List(Int) {
   case b {
     <<i, rest:bits>> -> {
       [i, ..bit_array_to_decimal_list(rest)]
+    }
+    _ -> []
+  }
+}
+
+fn extract_unsigned_short_to_int_list(
+  data: BitArray,
+  size: Int,
+  count: Int,
+) -> List(Int) {
+  case data {
+    <<num:size(16), rest:bits>> if count < size -> {
+      [num, ..extract_unsigned_short_to_int_list(rest, size, count + 1)]
     }
     _ -> []
   }
@@ -532,6 +586,7 @@ fn extract_ascii_data(data: BitArray) -> String {
   |> result.unwrap("[[ERROR]]")
 }
 
+/// For an unsigned short of length n, turn it into a list of ints
 /// Take the bit array types that need to be converted to some sort
 /// of decimal and convert them
 fn extract_integer_data(exif_entry: RawExifEntry) -> Int {
@@ -631,6 +686,12 @@ fn exif_tag_map() {
     #(<<0x92, 0x07>>, MeteringMode),
     #(<<0x92, 0x07>>, MeteringMode),
     #(<<0x92, 0x09>>, Flash),
+    #(<<0x92, 0x0a>>, FocalLength),
+    #(<<0x92, 0x14>>, SubjectArea),
+    #(<<0x92, 0x7c>>, MakerData),
+    #(<<0x92, 0x91>>, SubSecTimeOriginal),
+    #(<<0x92, 0x92>>, SubSecTimeDigitized),
+    #(<<0xa0, 0x00>>, FlashpixVersion),
     // Special raw tag to signify an offset to recurse to
     #(<<0x87, 0x69>>, ExifOffset),
   ])
