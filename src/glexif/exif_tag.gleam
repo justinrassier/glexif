@@ -34,6 +34,7 @@ pub type ExifTag {
   SubSecTimeOriginal(String)
   SubSecTimeDigitized(String)
   FlashpixVersion(String)
+  ColorSpace(ColorSpace)
   Unknown
 }
 
@@ -192,4 +193,18 @@ pub type Flash {
   AutoFiredRedEyeReductionReturnNotDetected
   AutoFiredRedEyeReductionReturnDetected
   InvalidFlash
+}
+
+// 0x1 = sRGB
+// 0x2 = Adobe RGB
+// 0xfffd = Wide Gamut RGB
+// 0xfffe = ICC Profile
+// 0xffff = Uncalibrated
+pub type ColorSpace {
+  SRGB
+  AdobeRGB
+  WideGamutRGB
+  ICCProfile
+  Uncalibrated
+  InvalidColorSpace
 }

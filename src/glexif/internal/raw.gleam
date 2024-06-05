@@ -86,6 +86,7 @@ pub type RawExifTag {
   SubSecTimeOriginal
   SubSecTimeDigitized
   FlashpixVersion
+  ColorSpace
 
   IFDLink(Int)
   // EndOfLink
@@ -521,6 +522,16 @@ pub fn raw_exif_entry_to_parsed_tag(entry: RawExifEntry) -> exif_tag.ExifTag {
 
     FlashpixVersion -> exif_tag.FlashpixVersion(extract_ascii_data(entry.data))
 
+    ColorSpace -> {
+      case bit_array.slice(entry.data, 0, 2) {
+        Ok(<<0x00, 0x01>>) -> exif_tag.ColorSpace(exif_tag.SRGB)
+        Ok(<<0x00, 0x02>>) -> exif_tag.ColorSpace(exif_tag.AdobeRGB)
+        Ok(<<0xff, 0xfd>>) -> exif_tag.ColorSpace(exif_tag.ICCProfile)
+        Ok(<<0xff, 0xff>>) -> exif_tag.ColorSpace(exif_tag.Uncalibrated)
+        _ -> exif_tag.ColorSpace(exif_tag.InvalidColorSpace)
+      }
+    }
+
     _ -> {
       exif_tag.Unknown
     }
@@ -693,6 +704,7 @@ fn exif_tag_map() {
     #(<<0x92, 0x91>>, SubSecTimeOriginal),
     #(<<0x92, 0x92>>, SubSecTimeDigitized),
     #(<<0xa0, 0x00>>, FlashpixVersion),
+    #(<<0xa0, 0x01>>, ColorSpace),
     // Special raw tag to signify an offset to recurse to
     #(<<0x87, 0x69>>, ExifOffset),
   ])
