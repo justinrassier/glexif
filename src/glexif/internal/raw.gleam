@@ -87,6 +87,7 @@ pub type RawExifTag {
   SubSecTimeDigitized
   FlashpixVersion
   ColorSpace
+  ExifImageWidth
 
   IFDLink(Int)
   // EndOfLink
@@ -532,6 +533,11 @@ pub fn raw_exif_entry_to_parsed_tag(entry: RawExifEntry) -> exif_tag.ExifTag {
       }
     }
 
+    ExifImageWidth ->
+      entry
+      |> extract_integer_data
+      |> exif_tag.ExifImageWidth
+
     _ -> {
       exif_tag.Unknown
     }
@@ -621,6 +627,10 @@ fn extract_integer_data(exif_entry: RawExifEntry) -> Int {
 
       numerator / denominator
     }
+    UnsignedLong(size) ->
+      bit_array.slice(exif_entry.data, 0, size * exif_entry.component_count)
+      |> result.unwrap(<<>>)
+      |> utils.bit_array_to_decimal
     _ -> panic as "unimplemented data type"
   }
 }
@@ -705,6 +715,7 @@ fn exif_tag_map() {
     #(<<0x92, 0x92>>, SubSecTimeDigitized),
     #(<<0xa0, 0x00>>, FlashpixVersion),
     #(<<0xa0, 0x01>>, ColorSpace),
+    #(<<0xa0, 0x02>>, ExifImageWidth),
     // Special raw tag to signify an offset to recurse to
     #(<<0x87, 0x69>>, ExifOffset),
   ])

@@ -35,6 +35,7 @@ pub type ExifTag {
   SubSecTimeDigitized(String)
   FlashpixVersion(String)
   ColorSpace(ColorSpace)
+  ExifImageWidth(Int)
   Unknown
 }
 
