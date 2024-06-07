@@ -10,7 +10,7 @@ pub fn main() {
 
 pub fn full_test() {
   glexif.get_exif_data_for_file("test/fixtures/test.jpeg")
-  |> list.take(37)
+  |> list.take(38)
   |> should.equal([
     exif_tag.Make("Apple"),
     exif_tag.Model("iPhone 14 Pro"),
@@ -58,5 +58,6 @@ pub fn full_test() {
     exif_tag.ExifImageWidth(4032),
     exif_tag.ExifImageHeight(3024),
     exif_tag.SensingMethod(exif_tag.OneChipColorArea),
+    exif_tag.SceneType(exif_tag.DirectlyPhotographed),
   ])
 }

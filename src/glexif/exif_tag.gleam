@@ -38,6 +38,7 @@ pub type ExifTag {
   ExifImageWidth(Int)
   ExifImageHeight(Int)
   SensingMethod(SensingMethod)
+  SceneType(SceneType)
   Unknown
 }
 
@@ -232,4 +233,8 @@ pub type SensingMethod {
   Trilinear
   ColorSequentialLinear
   InvalidSensingMethod
+}
+
+pub type SceneType {
+  DirectlyPhotographed
 }

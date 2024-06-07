@@ -90,6 +90,7 @@ pub type RawExifTag {
   ExifImageWidth
   ExifImageHeight
   SensingMethod
+  SceneType
 
   IFDLink(Int)
   // EndOfLink
@@ -562,6 +563,10 @@ pub fn raw_exif_entry_to_parsed_tag(entry: RawExifEntry) -> exif_tag.ExifTag {
       }
     }
 
+    SceneType -> {
+      exif_tag.SceneType(exif_tag.DirectlyPhotographed)
+    }
+
     _ -> {
       exif_tag.Unknown
     }
@@ -742,6 +747,7 @@ fn exif_tag_map() {
     #(<<0xa0, 0x02>>, ExifImageWidth),
     #(<<0xa0, 0x03>>, ExifImageHeight),
     #(<<0xa2, 0x17>>, SensingMethod),
+    #(<<0xa3, 0x01>>, SceneType),
     // Special raw tag to signify an offset to recurse to
     #(<<0x87, 0x69>>, ExifOffset),
   ])
