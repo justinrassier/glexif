@@ -50,7 +50,7 @@ pub fn full_test() {
     exif_tag.FocalLength(6.86),
     exif_tag.SubjectArea([2009, 1505, 2208, 1324]),
     // TODO: parse out maker data. This is a whole ball of wax and I'm kicking the can down the road
-    exif_tag.MakerData,
+    exif_tag.MakerData(exif_tag.TBD),
     exif_tag.SubSecTimeOriginal("289"),
     exif_tag.SubSecTimeDigitized("289"),
     exif_tag.FlashpixVersion("0100"),

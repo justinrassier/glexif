@@ -30,7 +30,7 @@ pub type ExifTag {
   Flash(Flash)
   FocalLength(Float)
   SubjectArea(List(Int))
-  MakerData
+  MakerData(TBD)
   SubSecTimeOriginal(String)
   SubSecTimeDigitized(String)
   FlashpixVersion(String)
@@ -39,6 +39,10 @@ pub type ExifTag {
   ExifImageHeight(Int)
   SensingMethod(SensingMethod)
   Unknown
+}
+
+pub type TBD {
+  TBD
 }
 
 // 1 = Horizontal (normal)

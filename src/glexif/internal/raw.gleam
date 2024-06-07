@@ -515,7 +515,7 @@ pub fn raw_exif_entry_to_parsed_tag(entry: RawExifEntry) -> exif_tag.ExifTag {
       |> exif_tag.SubjectArea
     }
 
-    MakerData -> exif_tag.MakerData
+    MakerData -> exif_tag.MakerData(exif_tag.TBD)
 
     SubSecTimeOriginal ->
       exif_tag.SubSecTimeOriginal(extract_ascii_data(entry.data))
@@ -681,7 +681,7 @@ fn extract_signed_rational_to_fraction(data: BitArray) -> exif_tag.Fraction {
   case signed {
     "0" -> signed
     "1" ->
-      todo as "re-learn how the heck to work with signed binary stuff again"
+      panic as "re-learn how the heck to work with signed binary stuff again"
     _ -> panic as "wut?"
   }
 
