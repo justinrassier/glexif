@@ -89,6 +89,7 @@ pub type RawExifTag {
   ColorSpace
   ExifImageWidth
   ExifImageHeight
+  SensingMethod
 
   IFDLink(Int)
   // EndOfLink
@@ -539,10 +540,27 @@ pub fn raw_exif_entry_to_parsed_tag(entry: RawExifEntry) -> exif_tag.ExifTag {
       |> extract_integer_data
       |> exif_tag.ExifImageWidth
 
-    ExifImageHeight->
+    ExifImageHeight ->
       entry
       |> extract_integer_data
       |> exif_tag.ExifImageHeight
+
+    SensingMethod -> {
+      let int_value =
+        entry
+        |> extract_integer_data
+
+      case int_value {
+        1 -> exif_tag.SensingMethod(exif_tag.SensingMethodNotDefined)
+        2 -> exif_tag.SensingMethod(exif_tag.OneChipColorArea)
+        3 -> exif_tag.SensingMethod(exif_tag.TwoChipColorArea)
+        4 -> exif_tag.SensingMethod(exif_tag.ThreeChipColorArea)
+        5 -> exif_tag.SensingMethod(exif_tag.ColorSequentialArea)
+        7 -> exif_tag.SensingMethod(exif_tag.Trilinear)
+        8 -> exif_tag.SensingMethod(exif_tag.ColorSequentialLinear)
+        _ -> exif_tag.SensingMethod(exif_tag.InvalidSensingMethod)
+      }
+    }
 
     _ -> {
       exif_tag.Unknown
@@ -723,6 +741,7 @@ fn exif_tag_map() {
     #(<<0xa0, 0x01>>, ColorSpace),
     #(<<0xa0, 0x02>>, ExifImageWidth),
     #(<<0xa0, 0x03>>, ExifImageHeight),
+    #(<<0xa2, 0x17>>, SensingMethod),
     // Special raw tag to signify an offset to recurse to
     #(<<0x87, 0x69>>, ExifOffset),
   ])

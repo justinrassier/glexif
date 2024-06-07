@@ -72,7 +72,7 @@ pub fn get_raw_entries_test() {
     |> result.unwrap(<<0, 0>>)
     |> utils.bit_array_to_decimal
 
-  list.take(raw.get_raw_entries(segment.raw_data, 10, entry_count, 1), 36)
+  list.take(raw.get_raw_entries(segment.raw_data, 10, entry_count, 1), 37)
   |> should.equal([
     Ok(raw.RawExifEntry(raw.Make, raw.AsciiString(1), 6, <<"Apple":utf8, 0>>)),
     Ok(
@@ -231,6 +231,11 @@ pub fn get_raw_entries_test() {
     Ok(
       raw.RawExifEntry(raw.ExifImageHeight, raw.UnsignedLong(4), 1, <<
         0, 0, 11, 208,
+      >>),
+    ),
+    Ok(
+      raw.RawExifEntry(raw.SensingMethod, raw.UnsignedShort(2), 1, <<
+        0, 2, 0, 0,
       >>),
     ),
   ])
