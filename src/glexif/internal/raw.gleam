@@ -88,6 +88,7 @@ pub type RawExifTag {
   FlashpixVersion
   ColorSpace
   ExifImageWidth
+  ExifImageHeight
 
   IFDLink(Int)
   // EndOfLink
@@ -538,6 +539,11 @@ pub fn raw_exif_entry_to_parsed_tag(entry: RawExifEntry) -> exif_tag.ExifTag {
       |> extract_integer_data
       |> exif_tag.ExifImageWidth
 
+    ExifImageHeight->
+      entry
+      |> extract_integer_data
+      |> exif_tag.ExifImageHeight
+
     _ -> {
       exif_tag.Unknown
     }
@@ -716,6 +722,7 @@ fn exif_tag_map() {
     #(<<0xa0, 0x00>>, FlashpixVersion),
     #(<<0xa0, 0x01>>, ColorSpace),
     #(<<0xa0, 0x02>>, ExifImageWidth),
+    #(<<0xa0, 0x03>>, ExifImageHeight),
     // Special raw tag to signify an offset to recurse to
     #(<<0x87, 0x69>>, ExifOffset),
   ])
