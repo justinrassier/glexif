@@ -1,5 +1,5 @@
-import file_streams/read_stream.{type ReadStream}
-import file_streams/read_stream_error.{type ReadStreamError}
+import file_streams/file_stream
+import file_streams/file_stream_error
 import gleam/bit_array
 import gleam/dict
 import gleam/int
@@ -149,9 +149,9 @@ pub type RawExifEntry {
 
 /// move the stream ahead by reading until the exif marker in the file
 pub fn read_until_marker(
-  rs: read_stream.ReadStream,
-) -> Result(BitArray, ReadStreamError) {
-  case read_stream.read_bytes(rs, 2) {
+  rs: file_stream.FileStream,
+) -> Result(BitArray, file_stream_error.FileStreamError) {
+  case file_stream.read_bytes(rs, 2) {
     Ok(bytes) -> {
       let _ = case bytes {
         <<0xFF, 0xE1>> -> Ok(bytes)
@@ -163,8 +163,8 @@ pub fn read_until_marker(
 }
 
 /// size is the two bytes after the exif marker
-pub fn read_exif_size(rs: ReadStream) -> Int {
-  case read_stream.read_int16_be(rs) {
+pub fn read_exif_size(rs: file_stream.FileStream) -> Int {
+  case file_stream.read_int16_be(rs) {
     Ok(val) -> {
       val
     }
@@ -173,12 +173,12 @@ pub fn read_exif_size(rs: ReadStream) -> Int {
 }
 
 pub fn read_exif_segment(
-  rs: ReadStream,
+  rs: file_stream.FileStream,
   exif_full_size: Int,
 ) -> Result(ExifSegment, ExifParseError) {
   // the exif size info is part of the data size itself, and we already read those bytes in
   let raw_bytes =
-    result.unwrap(read_stream.read_bytes(rs, exif_full_size - 2), <<>>)
+    result.unwrap(file_stream.read_bytes(rs, exif_full_size - 2), <<>>)
 
   let exif_header_bytes = bit_array.slice(raw_bytes, 0, 6)
 
@@ -886,7 +886,7 @@ pub fn raw_exif_entry_to_parsed_tag(
     }
 
     u -> {
-      io.debug(u)
+      // io.debug(u)
       record
     }
   }

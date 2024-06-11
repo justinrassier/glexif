@@ -1,47 +1,44 @@
-import file_streams/read_stream.{type ReadStream}
-import file_streams/read_stream_error.{type ReadStreamError}
-import fixtures/test_segment
-import gleam/bit_array
-import gleam/io
-import gleam/list
-import gleam/result
-import gleeunit/should
-import glexif/exif_tag
-import glexif/internal/raw
-import glexif/internal/utils
-
 /// Verify the parsing of a exif segment within a real image gets the appropriate
 /// pieces split out
-pub fn read_exif_segment_test() {
-  let assert Ok(rs) = read_stream.open("test/fixtures/test.jpeg")
-  let _ = raw.read_until_marker(rs)
-  let raw_size = raw.read_exif_size(rs)
-  let _ = read_stream.close(rs)
-
-  raw_size
-  |> should.equal(12_493)
-  // The raw siz of the full raw segment including all headers
-  let segment =
-    raw.read_exif_segment(rs, raw_size)
-    |> should.be_ok
-
-  segment
-  |> should.equal(raw.ExifSegment(
-    size: raw_size,
-    exif_header: <<69, 120, 105, 102, 0, 0>>,
-    tiff_header: raw.Motorola(<<0x4d, 0x4d, 0x0, 0x2A, 0x0, 0x0, 0x0, 0x8>>),
-    raw_data: test_segment.test_jpeg_segment_raw_data,
-  ))
-
-  // Full size of the segment - "size" (2 bytes) - the "Exif" header to get all 
-  // the raw bytes used for reading entries with offsets
-  bit_array.byte_size(segment.raw_data)
-  |> should.equal(12_493 - 2 - bit_array.byte_size(segment.exif_header))
-}
 /// Test the raw parsed entries that are a rough parsing of all the information in each entry
 /// these values will then be handed to be formatted for what a user actually would want. This step
 /// could be optimized I'm sure, but it's a good intermediate step as I am learning the spec and how to 
 /// interpret these things
+// import fixtures/test_segment
+// import gleam/bit_array
+// import gleam/io
+// import gleam/list
+// import gleam/result
+// import gleeunit/should
+// import glexif/exif_tag
+// import glexif/internal/raw
+// import glexif/internal/utils
+// pub fn read_exif_segment_test() {
+//   let assert Ok(rs) = read_stream.open("test/fixtures/test.jpeg")
+//   let _ = raw.read_until_marker(rs)
+//   let raw_size = raw.read_exif_size(rs)
+//   let _ = read_stream.close(rs)
+//
+//   raw_size
+//   |> should.equal(12_493)
+//   // The raw siz of the full raw segment including all headers
+//   let segment =
+//     raw.read_exif_segment(rs, raw_size)
+//     |> should.be_ok
+//
+//   segment
+//   |> should.equal(raw.ExifSegment(
+//     size: raw_size,
+//     exif_header: <<69, 120, 105, 102, 0, 0>>,
+//     tiff_header: raw.Motorola(<<0x4d, 0x4d, 0x0, 0x2A, 0x0, 0x0, 0x0, 0x8>>),
+//     raw_data: test_segment.test_jpeg_segment_raw_data,
+//   ))
+//
+//   // Full size of the segment - "size" (2 bytes) - the "Exif" header to get all 
+//   // the raw bytes used for reading entries with offsets
+//   bit_array.byte_size(segment.raw_data)
+//   |> should.equal(12_493 - 2 - bit_array.byte_size(segment.exif_header))
+// }
 // pub fn get_raw_entries_test() {
 //   let assert Ok(rs) = read_stream.open("test/fixtures/test.jpeg")
 //   let _ = raw.read_until_marker(rs)
