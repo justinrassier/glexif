@@ -2,14 +2,34 @@ import file_streams/read_stream.{type ReadStream}
 import file_streams/read_stream_error.{type ReadStreamError}
 import gleam/bit_array
 import gleam/dict
-import gleam/float
 import gleam/int
 import gleam/io
 import gleam/list
+import gleam/option.{Some}
 import gleam/result
 import gleam/string
 import glexif/exif_tag
+import glexif/exif_tags/color_space
+import glexif/exif_tags/components_configuration
+import glexif/exif_tags/composite_image
+import glexif/exif_tags/exposure_mode
+import glexif/exif_tags/exposure_program
+import glexif/exif_tags/flash
+import glexif/exif_tags/gps_altitude_ref
+import glexif/exif_tags/metering_mode
+import glexif/exif_tags/orientation
+import glexif/exif_tags/resolution_unit
+import glexif/exif_tags/scene_capture_type
+import glexif/exif_tags/scene_type
+import glexif/exif_tags/sensing_method
+import glexif/exif_tags/white_balance
+import glexif/exif_tags/y_cb_cr_positioning
+
 import glexif/internal/utils
+import glexif/units/fraction.{type Fraction, Fraction}
+import glexif/units/gps_coordinates.{
+  type GPSCoordinates, GPSCoordinates, InvalidGPSCoordinates,
+}
 
 pub type ExifParseError {
   BadHeaders(message: String)
@@ -91,12 +111,25 @@ pub type RawExifTag {
   ExifImageHeight
   SensingMethod
   SceneType
+  ExposureMode
+  WhiteBalance
+  FocalLengthIn35mmFormat
+  SceneCaptureType
+  LensInfo
+  LensMake
+  LensModel
+  CompositeImage
+  GPSLatitudeRef
+  GPSLatitude
+  GPSLongitudeRef
+  GPSLongitude
+  GPSAltitudeRef
+  GPSAltitude
 
+  GPSLink(Int)
   IFDLink(Int)
-  // EndOfLink
-  // Paired with ExifOffset
-  EndOfIFD
   // No more offset. End of everything
+  EndOfIFD
   UnknownExifTag(entry_byte_string: String)
 }
 
@@ -162,12 +195,17 @@ pub fn read_exif_segment(
 
   case exif_header_bytes, tiff_header_type {
     Ok(<<69, 120, 105, 102, 0, 0>>), Ok(tiff_header) ->
-      Ok(ExifSegment(
-        size: exif_full_size,
-        exif_header: <<69, 120, 105, 102, 0, 0>>,
-        tiff_header: tiff_header,
-        raw_data: raw_data,
-      ))
+      case tiff_header {
+        Intel(_) -> panic as "Unimplemented parsing for Intel header"
+        Motorola(_) -> {
+          Ok(ExifSegment(
+            size: exif_full_size,
+            exif_header: <<69, 120, 105, 102, 0, 0>>,
+            tiff_header: tiff_header,
+            raw_data: raw_data,
+          ))
+        }
+      }
     _, Error(m) -> Error(m)
     _, _ -> Error(BadHeaders("Generic error"))
   }
@@ -183,25 +221,18 @@ fn get_tiff_header(
   }
 }
 
-pub fn parse_exif_data(exif_segment: ExifSegment) -> List(exif_tag.ExifTag) {
-  // let total_entries =
-  //   exif_segment.raw_data
-  //   |> bit_array.slice(8, 2)
-  //   |> result.unwrap(<<>>)
-  //   |> bit_array_to_decimal
-
+pub fn parse_exif_data_as_record(
+  exif_segment: ExifSegment,
+) -> exif_tag.ExifTagRecord {
   // entries are 12 bytes long. They start at an offset of 8, but including the "MM" header bytes means we start at 10
   let entry_count =
     bit_array.slice(exif_segment.raw_data, 8, 2)
     |> result.unwrap(<<0, 0>>)
     |> utils.bit_array_to_decimal
 
-  get_raw_entries(exif_segment.raw_data, 10, entry_count, 1)
-  |> list.map(fn(r) {
-    case r {
-      Ok(raw_tag) -> raw_exif_entry_to_parsed_tag(raw_tag)
-      Error(_) -> exif_tag.Unknown
-    }
+  get_raw_entries(exif_segment.raw_data, 10, entry_count, 1, IFD)
+  |> list.fold(exif_tag.new(), fn(record, tag) {
+    raw_exif_entry_to_parsed_tag(record, tag)
   })
 }
 
@@ -210,15 +241,18 @@ pub fn get_raw_entries(
   start: Int,
   total_segment_count: Int,
   current_entry: Int,
-) -> List(Result(RawExifEntry, ExifParseError)) {
+  offset_location: OffsetLocation,
+) -> List(RawExifEntry) {
   let entry_bits = bit_array.slice(segment_bytes, start, 12)
 
-  let tag = parse_raw_exif_tag(entry_bits, current_entry, total_segment_count)
+  let tag =
+    parse_raw_exif_tag(
+      entry_bits,
+      current_entry,
+      total_segment_count,
+      offset_location,
+    )
 
-  // io.debug(
-  //   int.to_string(current_entry) <> "/" <> int.to_string(total_segment_count),
-  // )
-  // io.debug(tag)
   let data_type =
     entry_bits
     |> result.try(bit_array.slice(_, 2, 2))
@@ -252,36 +286,48 @@ pub fn get_raw_entries(
       // first 2 bytes is the number of elements.
       list.append(
         // recurse down the offset
-        get_raw_entries(segment_bytes, offset + 2, entry_count, 1),
+        get_raw_entries(segment_bytes, offset + 2, entry_count, 1, IFD),
         // continue recursing the current segment
         get_raw_entries(
           segment_bytes,
           start + 12,
           total_segment_count,
           current_entry + 1,
+          offset_location,
         ),
       )
     }
     // link off to the next IFD
     IFDLink(offset), _, _, _ -> {
-      // io.debug("exif offset?")
-      // io.debug(
-      //   int.to_string(current_entry)
-      //   <> "/"
-      //   <> int.to_string(total_segment_count),
-      // )
-      // io.debug(tag)
       let entry_count =
         bit_array.slice(segment_bytes, offset, 2)
         |> result.unwrap(<<0, 0>>)
         |> utils.bit_array_to_decimal
       list.append(
-        get_raw_entries(segment_bytes, offset + 2, entry_count, 1),
+        get_raw_entries(segment_bytes, offset + 2, entry_count, 1, IFD),
         get_raw_entries(
           segment_bytes,
           start + 12,
           total_segment_count,
           current_entry + 1,
+          offset_location,
+        ),
+      )
+    }
+    GPSLink(offset), _, _, _ -> {
+      let entry_count =
+        bit_array.slice(segment_bytes, offset, 2)
+        |> result.unwrap(<<0, 0>>)
+        |> utils.bit_array_to_decimal
+
+      list.append(
+        get_raw_entries(segment_bytes, offset + 2, entry_count, 1, GPS),
+        get_raw_entries(
+          segment_bytes,
+          start + 12,
+          total_segment_count,
+          current_entry + 1,
+          offset_location,
         ),
       )
     }
@@ -289,12 +335,12 @@ pub fn get_raw_entries(
       if current_entry <= total_segment_count
     -> {
       let base_element = [
-        Ok(RawExifEntry(
+        RawExifEntry(
           tag: t,
           data_type: data_type,
           component_count: component_count,
           data: data,
-        )),
+        ),
       ]
       list.append(
         base_element,
@@ -303,17 +349,11 @@ pub fn get_raw_entries(
           start + 12,
           total_segment_count,
           current_entry + 1,
+          offset_location,
         ),
       )
     }
     _, _, _, _ -> {
-      // io.debug("here?")
-      // io.debug(
-      //   int.to_string(current_entry)
-      //   <> "/"
-      //   <> int.to_string(total_segment_count),
-      // )
-      // io.debug(tag)
       []
     }
   }
@@ -324,12 +364,21 @@ fn parse_raw_exif_tag(
   entry: Result(BitArray, Nil),
   current_entry_count: Int,
   total_segment_count: Int,
+  offset_location: OffsetLocation,
 ) -> RawExifTag {
   // the one segment past the last segment is either offset to a new link or the end of things
   let end_or_offset_index = total_segment_count + 1
   entry
   |> result.try(bit_array.slice(_, 0, 2))
-  |> result.try(dict.get(exif_tag_map(), _))
+  |> result.try(dict.get(exif_tag_map(offset_location), _))
+  |> result.try_recover(fn(_) {
+    case entry {
+      Ok(<<0x88, 0x25, 0, 4, 0, 0, 0, 1, rest:bits>>) -> {
+        Ok(GPSLink(utils.bit_array_to_decimal(rest)))
+      }
+      _ -> Error(Nil)
+    }
+  })
   |> result.try_recover(fn(_) {
     case current_entry_count, total_segment_count {
       // if we are one past the last entry, that will either be an offset
@@ -360,215 +409,485 @@ fn parse_raw_exif_tag(
 
 /// Convert the sub-optimal raw partially parsed entry into
 /// the final consumable tag
-pub fn raw_exif_entry_to_parsed_tag(entry: RawExifEntry) -> exif_tag.ExifTag {
+pub fn raw_exif_entry_to_parsed_tag(
+  record: exif_tag.ExifTagRecord,
+  entry: RawExifEntry,
+) -> exif_tag.ExifTagRecord {
   case entry.tag {
-    Make ->
-      entry.data
-      |> extract_ascii_data
-      |> exif_tag.Make
+    Make -> {
+      let make =
+        entry.data
+        |> extract_ascii_data
+        |> Some
 
-    Model ->
-      entry.data
-      |> extract_ascii_data
-      |> exif_tag.Model
-
-    Orientation ->
-      entry
-      |> extract_integer_data
-      |> dict.get(exif_orientation_map(), _)
-      |> result.unwrap(exif_tag.InvalidOrientation)
-      |> exif_tag.Orientation
-
-    XResolution -> exif_tag.XResolution(extract_integer_data(entry))
-    YResolution -> exif_tag.YResolution(extract_integer_data(entry))
-    ResolutionUnit -> {
-      case extract_integer_data(entry) {
-        1 -> exif_tag.ResolutionUnit(exif_tag.None)
-        2 -> exif_tag.ResolutionUnit(exif_tag.Inches)
-        3 -> exif_tag.ResolutionUnit(exif_tag.Centimeters)
-        _ -> exif_tag.ResolutionUnit(exif_tag.InvalidResolutionUnit)
-      }
+      exif_tag.ExifTagRecord(..record, make: make)
     }
-    Software ->
-      entry.data
-      |> extract_ascii_data
-      |> exif_tag.Software
 
-    ModifyDate ->
-      entry.data
-      |> extract_ascii_data
-      |> exif_tag.ModifyDate
+    Model -> {
+      let model =
+        entry.data
+        |> extract_ascii_data
+        |> Some
+      exif_tag.ExifTagRecord(..record, model: model)
+    }
+    Orientation -> {
+      let orientation =
+        entry
+        |> extract_integer_data
+        |> dict.get(exif_orientation_map(), _)
+        |> result.unwrap(orientation.InvalidOrientation)
+        |> Some
 
-    HostComputer ->
-      entry.data
-      |> extract_ascii_data
-      |> exif_tag.HostComputer
+      exif_tag.ExifTagRecord(..record, orientation: orientation)
+    }
+    XResolution ->
+      exif_tag.ExifTagRecord(
+        ..record,
+        x_resolution: Some(extract_integer_data(entry)),
+      )
+    YResolution ->
+      exif_tag.ExifTagRecord(
+        ..record,
+        y_resolution: Some(extract_integer_data(entry)),
+      )
+    ResolutionUnit -> {
+      let unit = case extract_integer_data(entry) {
+        1 -> resolution_unit.NoResolutionTagUnit
+        2 -> resolution_unit.Inches
+        3 -> resolution_unit.Centimeters
+        _ -> resolution_unit.InvalidResolutionUnit
+      }
+
+      exif_tag.ExifTagRecord(..record, resolution_unit: Some(unit))
+    }
+    Software -> {
+      let software =
+        entry.data
+        |> extract_ascii_data
+        |> Some
+      exif_tag.ExifTagRecord(..record, software: software)
+    }
+    ModifyDate -> {
+      let date =
+        entry.data
+        |> extract_ascii_data
+        |> Some
+
+      exif_tag.ExifTagRecord(..record, modify_date: date)
+    }
+
+    HostComputer -> {
+      let host_computer =
+        entry.data
+        |> extract_ascii_data
+        |> Some
+
+      exif_tag.ExifTagRecord(..record, host_computer: host_computer)
+    }
 
     YCbCrPositioning -> {
-      case extract_integer_data(entry) {
-        1 -> exif_tag.YCbCrPositioning(exif_tag.Centered)
-        2 -> exif_tag.YCbCrPositioning(exif_tag.CoSited)
-        _ -> exif_tag.YCbCrPositioning(exif_tag.InvalidYCbCrPositioning)
+      let positioning = case extract_integer_data(entry) {
+        1 -> y_cb_cr_positioning.Centered
+        2 -> y_cb_cr_positioning.CoSited
+        _ -> y_cb_cr_positioning.InvalidYCbCrPositioning
       }
+      exif_tag.ExifTagRecord(..record, y_cb_cr_positioning: Some(positioning))
     }
-    ExposureTime ->
-      exif_tag.ExposureTime(extract_unsigned_rational_to_fraction(entry.data))
+    ExposureTime -> {
+      let exposure_time = extract_unsigned_rational_to_fraction(entry.data)
+      exif_tag.ExifTagRecord(..record, exposure_time: Some(exposure_time))
+    }
 
-    FNumber ->
-      exif_tag.FNumber(extract_unsigned_rational_to_fraction(entry.data))
-
-    ExposureProgram ->
-      case extract_integer_data(entry) {
-        0 -> exif_tag.ExposureProgram(exif_tag.NotDefined)
-        1 -> exif_tag.ExposureProgram(exif_tag.Manual)
-        2 -> exif_tag.ExposureProgram(exif_tag.ProgramAE)
-        3 -> exif_tag.ExposureProgram(exif_tag.AperturePriorityAE)
-        4 -> exif_tag.ExposureProgram(exif_tag.ShutterSpeedPriorityAE)
-        5 -> exif_tag.ExposureProgram(exif_tag.Creative)
-        6 -> exif_tag.ExposureProgram(exif_tag.Action)
-        7 -> exif_tag.ExposureProgram(exif_tag.Portrait)
-        8 -> exif_tag.ExposureProgram(exif_tag.Landscape)
-        _ -> exif_tag.ExposureProgram(exif_tag.InvalidExposureProgram)
+    FNumber -> {
+      let f_number = extract_unsigned_rational_to_fraction(entry.data)
+      exif_tag.ExifTagRecord(..record, f_number: Some(f_number))
+    }
+    ExposureProgram -> {
+      let exposure_program = case extract_integer_data(entry) {
+        0 -> exposure_program.NotDefined
+        1 -> exposure_program.Manual
+        2 -> exposure_program.ProgramAE
+        3 -> exposure_program.AperturePriorityAE
+        4 -> exposure_program.ShutterSpeedPriorityAE
+        5 -> exposure_program.Creative
+        6 -> exposure_program.Action
+        7 -> exposure_program.Portrait
+        8 -> exposure_program.Landscape
+        _ -> exposure_program.InvalidExposureProgram
       }
+      exif_tag.ExifTagRecord(..record, exposure_program: Some(exposure_program))
+    }
 
-    ISO -> exif_tag.ISO(extract_integer_data(entry))
+    ISO -> {
+      let iso = extract_integer_data(entry)
+      exif_tag.ExifTagRecord(..record, iso: Some(iso))
+    }
 
-    ExifVersion -> exif_tag.ExifVersion(extract_ascii_data(entry.data))
+    ExifVersion -> {
+      let exif_version = extract_ascii_data(entry.data) |> Some
+      exif_tag.ExifTagRecord(..record, exif_version: exif_version)
+    }
 
-    DateTimeOriginal ->
-      exif_tag.DateTimeOriginal(extract_ascii_data(entry.data))
+    DateTimeOriginal -> {
+      let date_time_original = extract_ascii_data(entry.data) |> Some
 
-    CreateDate -> exif_tag.CreateDate(extract_ascii_data(entry.data))
+      exif_tag.ExifTagRecord(..record, date_time_original: date_time_original)
+    }
 
-    OffsetTime -> exif_tag.OffsetTime(extract_ascii_data(entry.data))
+    CreateDate -> {
+      let create_date = extract_ascii_data(entry.data) |> Some
 
-    OffsetTimeOriginal ->
-      exif_tag.OffsetTimeOriginal(extract_ascii_data(entry.data))
+      exif_tag.ExifTagRecord(..record, create_date: create_date)
+    }
 
-    OffsetTimeDigitized ->
-      exif_tag.OffsetTimeDigitized(extract_ascii_data(entry.data))
+    OffsetTime -> {
+      let offset_time = extract_ascii_data(entry.data) |> Some
 
-    ComponentsConfiguration ->
-      bit_array_to_decimal_list(entry.data)
-      |> list.map(fn(v) {
-        case v {
-          0 -> exif_tag.NA
-          1 -> exif_tag.Y
-          2 -> exif_tag.Cb
-          3 -> exif_tag.Cr
-          4 -> exif_tag.R
-          5 -> exif_tag.G
-          6 -> exif_tag.B
-          _ -> exif_tag.InvalidComponentsConfiguration
-        }
-      })
-      |> exif_tag.ComponentsConfiguration
+      exif_tag.ExifTagRecord(..record, offset_time: offset_time)
+    }
 
-    ShutterSpeedValue ->
-      exif_tag.ShutterSpeedValue(extract_signed_rational_to_fraction(entry.data))
+    OffsetTimeOriginal -> {
+      let offset_time_original = extract_ascii_data(entry.data) |> Some
 
-    ApertureValue ->
-      exif_tag.ApertureValue(extract_unsigned_rational_to_fraction(entry.data))
-
-    BrightnessValue -> {
-      let exif_tag.Fraction(numerator, denominator) =
-        extract_unsigned_rational_to_fraction(entry.data)
-      exif_tag.BrightnessValue(
-        int.to_float(numerator) /. int.to_float(denominator),
+      exif_tag.ExifTagRecord(
+        ..record,
+        offset_time_original: offset_time_original,
       )
     }
 
-    ExposureCompensation ->
-      exif_tag.ExposureCompensation(extract_unsigned_rational_to_fraction(
-        entry.data,
-      ))
+    OffsetTimeDigitized -> {
+      let offset_time_digitized = extract_ascii_data(entry.data) |> Some
 
-    MeteringMode ->
-      {
-        case extract_integer_data(entry) {
-          0 -> exif_tag.UnknownMeteringMode
-          1 -> exif_tag.Average
-          2 -> exif_tag.CenterWeightedAverage
-          3 -> exif_tag.Spot
-          4 -> exif_tag.MultiSpot
-          5 -> exif_tag.MultiSegement
-          6 -> exif_tag.Partial
-          255 -> exif_tag.Other
-          _ -> exif_tag.InvalidMeteringMode
-        }
+      exif_tag.ExifTagRecord(
+        ..record,
+        offset_time_digitized: offset_time_digitized,
+      )
+    }
+
+    ComponentsConfiguration -> {
+      let components_configuration =
+        bit_array_to_decimal_list(entry.data)
+        |> list.map(fn(v) {
+          case v {
+            0 -> components_configuration.NA
+            1 -> components_configuration.Y
+            2 -> components_configuration.Cb
+            3 -> components_configuration.Cr
+            4 -> components_configuration.R
+            5 -> components_configuration.G
+            6 -> components_configuration.B
+            _ -> components_configuration.InvalidComponentsConfiguration
+          }
+        })
+      exif_tag.ExifTagRecord(
+        ..record,
+        components_configuration: Some(components_configuration),
+      )
+    }
+
+    ShutterSpeedValue -> {
+      let shutter_speed_value = extract_signed_rational_to_fraction(entry.data)
+
+      exif_tag.ExifTagRecord(
+        ..record,
+        shutter_speed_value: Some(shutter_speed_value),
+      )
+    }
+    ApertureValue -> {
+      let aperature_value = extract_signed_rational_to_fraction(entry.data)
+
+      exif_tag.ExifTagRecord(..record, aperature_value: Some(aperature_value))
+    }
+
+    BrightnessValue -> {
+      let Fraction(numerator, denominator) =
+        extract_unsigned_rational_to_fraction(entry.data)
+      let brightness_value =
+        int.to_float(numerator) /. int.to_float(denominator)
+
+      exif_tag.ExifTagRecord(..record, brightness_value: Some(brightness_value))
+    }
+
+    ExposureCompensation -> {
+      let exposure_compensation =
+        extract_unsigned_rational_to_fraction(entry.data)
+      exif_tag.ExifTagRecord(
+        ..record,
+        exposure_compensation: Some(exposure_compensation),
+      )
+    }
+    //
+    MeteringMode -> {
+      let metering_mode = case extract_integer_data(entry) {
+        0 -> metering_mode.UnknownMeteringMode
+        1 -> metering_mode.Average
+        2 -> metering_mode.CenterWeightedAverage
+        3 -> metering_mode.Spot
+        4 -> metering_mode.MultiSpot
+        5 -> metering_mode.MultiSegement
+        6 -> metering_mode.Partial
+        255 -> metering_mode.Other
+        _ -> metering_mode.InvalidMeteringMode
       }
-      |> exif_tag.MeteringMode
+      exif_tag.ExifTagRecord(..record, metering_mode: Some(metering_mode))
+    }
+    //
+    Flash -> {
+      let flash =
+        bit_array.slice(entry.data, 0, 2)
+        |> result.try(dict.get(flash_tag_map(), _))
+        |> result.unwrap(flash.InvalidFlash)
 
-    Flash ->
-      bit_array.slice(entry.data, 0, 2)
-      |> result.try(dict.get(flash_tag_map(), _))
-      |> result.unwrap(exif_tag.InvalidFlash)
-      |> exif_tag.Flash
+      exif_tag.ExifTagRecord(..record, flash: Some(flash))
+    }
 
     FocalLength -> {
-      let exif_tag.Fraction(numerator, denominator) =
+      let Fraction(numerator, denominator) =
         extract_unsigned_rational_to_fraction(entry.data)
-      exif_tag.FocalLength(int.to_float(numerator) /. int.to_float(denominator))
+
+      let focal_length = int.to_float(numerator) /. int.to_float(denominator)
+
+      exif_tag.ExifTagRecord(..record, focal_length: Some(focal_length))
     }
 
     SubjectArea -> {
-      extract_unsigned_short_to_int_list(entry.data, entry.component_count, 0)
-      |> exif_tag.SubjectArea
+      let subject_area =
+        extract_unsigned_short_to_int_list(entry.data, entry.component_count, 0)
+
+      exif_tag.ExifTagRecord(..record, subject_area: Some(subject_area))
     }
 
-    MakerData -> exif_tag.MakerData(exif_tag.TBD)
+    MakerData ->
+      exif_tag.ExifTagRecord(..record, maker_data: Some(exif_tag.TBD))
 
-    SubSecTimeOriginal ->
-      exif_tag.SubSecTimeOriginal(extract_ascii_data(entry.data))
+    SubSecTimeOriginal -> {
+      let sub_sec_time_original = extract_ascii_data(entry.data)
+      exif_tag.ExifTagRecord(
+        ..record,
+        sub_sec_time_original: Some(sub_sec_time_original),
+      )
+    }
 
-    SubSecTimeDigitized ->
-      exif_tag.SubSecTimeDigitized(extract_ascii_data(entry.data))
+    SubSecTimeDigitized -> {
+      let sub_sec_time_digitized = extract_ascii_data(entry.data)
+      exif_tag.ExifTagRecord(
+        ..record,
+        sub_sec_time_digitized: Some(sub_sec_time_digitized),
+      )
+    }
 
-    FlashpixVersion -> exif_tag.FlashpixVersion(extract_ascii_data(entry.data))
+    FlashpixVersion -> {
+      let flash_pix_version = extract_ascii_data(entry.data)
+      exif_tag.ExifTagRecord(
+        ..record,
+        flash_pix_version: Some(flash_pix_version),
+      )
+    }
 
     ColorSpace -> {
-      case bit_array.slice(entry.data, 0, 2) {
-        Ok(<<0x00, 0x01>>) -> exif_tag.ColorSpace(exif_tag.SRGB)
-        Ok(<<0x00, 0x02>>) -> exif_tag.ColorSpace(exif_tag.AdobeRGB)
-        Ok(<<0xff, 0xfd>>) -> exif_tag.ColorSpace(exif_tag.ICCProfile)
-        Ok(<<0xff, 0xff>>) -> exif_tag.ColorSpace(exif_tag.Uncalibrated)
-        _ -> exif_tag.ColorSpace(exif_tag.InvalidColorSpace)
+      let color_space = case bit_array.slice(entry.data, 0, 2) {
+        Ok(<<0x00, 0x01>>) -> color_space.SRGB
+        Ok(<<0x00, 0x02>>) -> color_space.AdobeRGB
+        Ok(<<0xff, 0xfd>>) -> color_space.ICCProfile
+        Ok(<<0xff, 0xff>>) -> color_space.Uncalibrated
+        _ -> color_space.InvalidColorSpace
       }
+      exif_tag.ExifTagRecord(..record, color_space: Some(color_space))
     }
 
-    ExifImageWidth ->
-      entry
-      |> extract_integer_data
-      |> exif_tag.ExifImageWidth
+    ExifImageWidth -> {
+      let exif_image_width =
+        entry
+        |> extract_integer_data
+        |> Some
+      exif_tag.ExifTagRecord(..record, exif_image_width: exif_image_width)
+    }
 
-    ExifImageHeight ->
-      entry
-      |> extract_integer_data
-      |> exif_tag.ExifImageHeight
+    ExifImageHeight -> {
+      let exif_image_height =
+        entry
+        |> extract_integer_data
+        |> Some
+      exif_tag.ExifTagRecord(..record, exif_image_height: exif_image_height)
+    }
 
     SensingMethod -> {
       let int_value =
         entry
         |> extract_integer_data
 
-      case int_value {
-        1 -> exif_tag.SensingMethod(exif_tag.SensingMethodNotDefined)
-        2 -> exif_tag.SensingMethod(exif_tag.OneChipColorArea)
-        3 -> exif_tag.SensingMethod(exif_tag.TwoChipColorArea)
-        4 -> exif_tag.SensingMethod(exif_tag.ThreeChipColorArea)
-        5 -> exif_tag.SensingMethod(exif_tag.ColorSequentialArea)
-        7 -> exif_tag.SensingMethod(exif_tag.Trilinear)
-        8 -> exif_tag.SensingMethod(exif_tag.ColorSequentialLinear)
-        _ -> exif_tag.SensingMethod(exif_tag.InvalidSensingMethod)
+      let sensing_method = case int_value {
+        1 -> sensing_method.SensingMethodNotDefined
+        2 -> sensing_method.OneChipColorArea
+        3 -> sensing_method.TwoChipColorArea
+        4 -> sensing_method.ThreeChipColorArea
+        5 -> sensing_method.ColorSequentialArea
+        7 -> sensing_method.Trilinear
+        8 -> sensing_method.ColorSequentialLinear
+        _ -> sensing_method.InvalidSensingMethod
       }
+      exif_tag.ExifTagRecord(..record, sensing_method: Some(sensing_method))
     }
 
     SceneType -> {
-      exif_tag.SceneType(exif_tag.DirectlyPhotographed)
+      exif_tag.ExifTagRecord(
+        ..record,
+        scene_type: Some(scene_type.DirectlyPhotographed),
+      )
+    }
+    ExposureMode -> {
+      let int_value =
+        entry
+        |> extract_integer_data
+      let exposure_mode = case int_value {
+        0 -> exposure_mode.Auto
+        1 -> exposure_mode.Manual
+        2 -> exposure_mode.AutoBracket
+        _ -> exposure_mode.InvalidExposureMode
+      }
+      exif_tag.ExifTagRecord(..record, exposure_mode: Some(exposure_mode))
+    }
+    WhiteBalance -> {
+      let int_value =
+        entry
+        |> extract_integer_data
+      let white_balance = case int_value {
+        0 -> white_balance.Auto
+        1 -> white_balance.Manual
+        _ -> white_balance.InvalidWhiteBalance
+      }
+      exif_tag.ExifTagRecord(..record, white_balance: Some(white_balance))
+    }
+    FocalLengthIn35mmFormat -> {
+      let int_value =
+        entry
+        |> extract_integer_data
+        |> Some
+      exif_tag.ExifTagRecord(..record, focal_length_in_35_mm_format: int_value)
+    }
+    SceneCaptureType -> {
+      let int_value =
+        entry
+        |> extract_integer_data
+      let scene_capture_type = case int_value {
+        0 -> scene_capture_type.Standard
+        1 -> scene_capture_type.Landscape
+        2 -> scene_capture_type.Portrait
+        3 -> scene_capture_type.Night
+        4 -> scene_capture_type.Other
+        _ -> scene_capture_type.InvalidSceneCaptureType
+      }
+      exif_tag.ExifTagRecord(
+        ..record,
+        scene_capture_type: Some(scene_capture_type),
+      )
+    }
+    LensInfo -> {
+      let fraction_list = bit_array_to_fraction_list(entry.data)
+
+      exif_tag.ExifTagRecord(..record, lens_info: Some(fraction_list))
+    }
+    LensMake -> {
+      let lens_make = extract_ascii_data(entry.data)
+      exif_tag.ExifTagRecord(..record, lens_make: Some(lens_make))
+    }
+    LensModel -> {
+      let lens_model = extract_ascii_data(entry.data)
+      exif_tag.ExifTagRecord(..record, lens_model: Some(lens_model))
+    }
+    CompositeImage -> {
+      let int_value = extract_integer_data(entry)
+      let composite_image = case int_value {
+        0 -> composite_image.Unknown
+        1 -> composite_image.NotACompositeImage
+        2 -> composite_image.GeneralCompositeImage
+        3 -> composite_image.CompositeImageCapturedWhileShooting
+        _ -> composite_image.InvalidCompositeImage
+      }
+
+      exif_tag.ExifTagRecord(..record, composite_image: Some(composite_image))
+    }
+    GPSLatitudeRef -> {
+      let gps_latitude_ref = extract_ascii_data(entry.data)
+      exif_tag.ExifTagRecord(..record, gps_latitude_ref: Some(gps_latitude_ref))
+    }
+    GPSLatitude -> {
+      let fraction_list = bit_array_to_fraction_list(entry.data)
+      let gps_coordinates = case fraction_list {
+        [
+          Fraction(degrees_numerator, degrees_denominator),
+          Fraction(minutes_numerator, minutes_denominator),
+          Fraction(seconds_numerator, seconds_denominator),
+        ] -> {
+          GPSCoordinates(
+            degrees: degrees_numerator / degrees_denominator,
+            minutes: minutes_numerator / minutes_denominator,
+            seconds: int.to_float(seconds_numerator)
+              /. int.to_float(seconds_denominator),
+          )
+        }
+        _ -> {
+          InvalidGPSCoordinates
+        }
+      }
+      exif_tag.ExifTagRecord(..record, gps_latitude: Some(gps_coordinates))
+    }
+    GPSLongitudeRef -> {
+      let gps_longitude_ref = extract_ascii_data(entry.data)
+      exif_tag.ExifTagRecord(
+        ..record,
+        gps_longitude_ref: Some(gps_longitude_ref),
+      )
+    }
+    GPSLongitude -> {
+      let fraction_list = bit_array_to_fraction_list(entry.data)
+      let gps_coordinates = case fraction_list {
+        [
+          Fraction(degrees_numerator, degrees_denominator),
+          Fraction(minutes_numerator, minutes_denominator),
+          Fraction(seconds_numerator, seconds_denominator),
+        ] -> {
+          GPSCoordinates(
+            degrees: degrees_numerator / degrees_denominator,
+            minutes: minutes_numerator / minutes_denominator,
+            seconds: int.to_float(seconds_numerator)
+              /. int.to_float(seconds_denominator),
+          )
+        }
+        _ -> {
+          InvalidGPSCoordinates
+        }
+      }
+      exif_tag.ExifTagRecord(..record, gps_longitude: Some(gps_coordinates))
+    }
+    GPSAltitudeRef -> {
+      let altitude_ref = case entry.data {
+        <<val, _rest:bits>> -> {
+          case val {
+            0 -> gps_altitude_ref.AboveSeaLevel
+            1 -> gps_altitude_ref.BelowSeaLevel
+            _ -> gps_altitude_ref.InvalidGPSAltitudeRef
+          }
+        }
+        _ -> gps_altitude_ref.InvalidGPSAltitudeRef
+      }
+
+      exif_tag.ExifTagRecord(..record, gps_altitude_ref: Some(altitude_ref))
+    }
+    GPSAltitude -> {
+      let gps_altitude_fraction =
+        extract_unsigned_rational_to_fraction(entry.data)
+      let gps_altitude_float = case gps_altitude_fraction {
+        Fraction(numerator, denominator) ->
+          int.to_float(numerator) /. int.to_float(denominator)
+      }
+
+      exif_tag.ExifTagRecord(..record, gps_altitude: Some(gps_altitude_float))
     }
 
-    _ -> {
-      exif_tag.Unknown
+    u -> {
+      io.debug(u)
+      record
     }
   }
 }
@@ -577,6 +896,15 @@ fn bit_array_to_decimal_list(b: BitArray) -> List(Int) {
   case b {
     <<i, rest:bits>> -> {
       [i, ..bit_array_to_decimal_list(rest)]
+    }
+    _ -> []
+  }
+}
+
+fn bit_array_to_fraction_list(b: BitArray) -> List(Fraction) {
+  case b {
+    <<numerator:size(32), denominator:size(32), rest:bits>> -> {
+      [Fraction(numerator, denominator), ..bit_array_to_fraction_list(rest)]
     }
     _ -> []
   }
@@ -597,14 +925,14 @@ fn extract_unsigned_short_to_int_list(
 
 fn exif_orientation_map() {
   dict.from_list([
-    #(1, exif_tag.Horizontal),
-    #(2, exif_tag.MirrorHorizontal),
-    #(3, exif_tag.Rotate180),
-    #(4, exif_tag.MirrorVertical),
-    #(5, exif_tag.MirrorHorizontalAndRotate270CW),
-    #(6, exif_tag.Rotate90CW),
-    #(7, exif_tag.MirrorHorizontalAndRotate90CW),
-    #(8, exif_tag.Rotate270CW),
+    #(1, orientation.Horizontal),
+    #(2, orientation.MirrorHorizontal),
+    #(3, orientation.Rotate180),
+    #(4, orientation.MirrorVertical),
+    #(5, orientation.MirrorHorizontalAndRotate270CW),
+    #(6, orientation.Rotate90CW),
+    #(7, orientation.MirrorHorizontalAndRotate90CW),
+    #(8, orientation.Rotate270CW),
   ])
 }
 
@@ -664,7 +992,7 @@ fn extract_integer_data(exif_entry: RawExifEntry) -> Int {
   }
 }
 
-fn extract_unsigned_rational_to_fraction(data: BitArray) -> exif_tag.Fraction {
+fn extract_unsigned_rational_to_fraction(data: BitArray) -> Fraction {
   let numerator =
     data
     |> bit_array.slice(0, 4)
@@ -676,10 +1004,10 @@ fn extract_unsigned_rational_to_fraction(data: BitArray) -> exif_tag.Fraction {
     |> result.map(utils.bit_array_to_decimal)
     |> result.unwrap(0)
 
-  exif_tag.Fraction(numerator, denominator)
+  Fraction(numerator, denominator)
 }
 
-fn extract_signed_rational_to_fraction(data: BitArray) -> exif_tag.Fraction {
+fn extract_signed_rational_to_fraction(data: BitArray) -> Fraction {
   let assert Ok(signed) = bit_array.base16_encode(data) |> string.first
 
   // TODO: I don't remember this stuff anymore! Ugh I feel ashamed
@@ -703,54 +1031,79 @@ fn extract_signed_rational_to_fraction(data: BitArray) -> exif_tag.Fraction {
     |> result.map(utils.bit_array_to_decimal)
     |> result.unwrap(0)
 
-  exif_tag.Fraction(numerator, denominator)
+  Fraction(numerator, denominator)
 }
 
-fn exif_tag_map() {
-  // lookup map from the bit array of the tag to its named type
-  dict.from_list([
-    #(<<0x01, 0x0f>>, Make),
-    #(<<0x01, 0x10>>, Model),
-    #(<<0x01, 0x12>>, Orientation),
-    #(<<0x01, 0x1a>>, XResolution),
-    #(<<0x01, 0x1b>>, YResolution),
-    #(<<0x01, 0x28>>, ResolutionUnit),
-    #(<<0x01, 0x31>>, Software),
-    #(<<0x01, 0x32>>, ModifyDate),
-    #(<<0x01, 0x3c>>, HostComputer),
-    #(<<0x02, 0x13>>, YCbCrPositioning),
-    #(<<0x82, 0x9a>>, ExposureTime),
-    #(<<0x82, 0x9d>>, FNumber),
-    #(<<0x88, 0x22>>, ExposureProgram),
-    #(<<0x88, 0x27>>, ISO),
-    #(<<0x90, 0x00>>, ExifVersion),
-    #(<<0x90, 0x03>>, DateTimeOriginal),
-    #(<<0x90, 0x04>>, CreateDate),
-    #(<<0x90, 0x10>>, OffsetTime),
-    #(<<0x90, 0x11>>, OffsetTimeOriginal),
-    #(<<0x90, 0x12>>, OffsetTimeDigitized),
-    #(<<0x91, 0x01>>, ComponentsConfiguration),
-    #(<<0x92, 0x01>>, ShutterSpeedValue),
-    #(<<0x92, 0x02>>, ApertureValue),
-    #(<<0x92, 0x03>>, BrightnessValue),
-    #(<<0x92, 0x04>>, ExposureCompensation),
-    #(<<0x92, 0x07>>, MeteringMode),
-    #(<<0x92, 0x07>>, MeteringMode),
-    #(<<0x92, 0x09>>, Flash),
-    #(<<0x92, 0x0a>>, FocalLength),
-    #(<<0x92, 0x14>>, SubjectArea),
-    #(<<0x92, 0x7c>>, MakerData),
-    #(<<0x92, 0x91>>, SubSecTimeOriginal),
-    #(<<0x92, 0x92>>, SubSecTimeDigitized),
-    #(<<0xa0, 0x00>>, FlashpixVersion),
-    #(<<0xa0, 0x01>>, ColorSpace),
-    #(<<0xa0, 0x02>>, ExifImageWidth),
-    #(<<0xa0, 0x03>>, ExifImageHeight),
-    #(<<0xa2, 0x17>>, SensingMethod),
-    #(<<0xa3, 0x01>>, SceneType),
-    // Special raw tag to signify an offset to recurse to
-    #(<<0x87, 0x69>>, ExifOffset),
-  ])
+type OffsetLocation {
+  IFD
+  // regular
+  GPS
+}
+
+fn exif_tag_map(offset_location: OffsetLocation) {
+  case offset_location {
+    IFD ->
+      dict.from_list([
+        #(<<0x01, 0x0f>>, Make),
+        #(<<0x01, 0x10>>, Model),
+        #(<<0x01, 0x12>>, Orientation),
+        #(<<0x01, 0x1a>>, XResolution),
+        #(<<0x01, 0x1b>>, YResolution),
+        #(<<0x01, 0x28>>, ResolutionUnit),
+        #(<<0x01, 0x31>>, Software),
+        #(<<0x01, 0x32>>, ModifyDate),
+        #(<<0x01, 0x3c>>, HostComputer),
+        #(<<0x02, 0x13>>, YCbCrPositioning),
+        #(<<0x82, 0x9a>>, ExposureTime),
+        #(<<0x82, 0x9d>>, FNumber),
+        #(<<0x88, 0x22>>, ExposureProgram),
+        #(<<0x88, 0x27>>, ISO),
+        #(<<0x90, 0x00>>, ExifVersion),
+        #(<<0x90, 0x03>>, DateTimeOriginal),
+        #(<<0x90, 0x04>>, CreateDate),
+        #(<<0x90, 0x10>>, OffsetTime),
+        #(<<0x90, 0x11>>, OffsetTimeOriginal),
+        #(<<0x90, 0x12>>, OffsetTimeDigitized),
+        #(<<0x91, 0x01>>, ComponentsConfiguration),
+        #(<<0x92, 0x01>>, ShutterSpeedValue),
+        #(<<0x92, 0x02>>, ApertureValue),
+        #(<<0x92, 0x03>>, BrightnessValue),
+        #(<<0x92, 0x04>>, ExposureCompensation),
+        #(<<0x92, 0x07>>, MeteringMode),
+        #(<<0x92, 0x07>>, MeteringMode),
+        #(<<0x92, 0x09>>, Flash),
+        #(<<0x92, 0x0a>>, FocalLength),
+        #(<<0x92, 0x14>>, SubjectArea),
+        #(<<0x92, 0x7c>>, MakerData),
+        #(<<0x92, 0x91>>, SubSecTimeOriginal),
+        #(<<0x92, 0x92>>, SubSecTimeDigitized),
+        #(<<0xa0, 0x00>>, FlashpixVersion),
+        #(<<0xa0, 0x01>>, ColorSpace),
+        #(<<0xa0, 0x02>>, ExifImageWidth),
+        #(<<0xa0, 0x03>>, ExifImageHeight),
+        #(<<0xa2, 0x17>>, SensingMethod),
+        #(<<0xa3, 0x01>>, SceneType),
+        #(<<0xa4, 0x02>>, ExposureMode),
+        #(<<0xa4, 0x03>>, WhiteBalance),
+        #(<<0xa4, 0x05>>, FocalLengthIn35mmFormat),
+        #(<<0xa4, 0x06>>, SceneCaptureType),
+        #(<<0xa4, 0x32>>, LensInfo),
+        #(<<0xa4, 0x33>>, LensMake),
+        #(<<0xa4, 0x34>>, LensModel),
+        #(<<0xa4, 0x60>>, CompositeImage),
+        // Special raw tag to signify an offset to recurse to
+        #(<<0x87, 0x69>>, ExifOffset),
+      ])
+    GPS ->
+      dict.from_list([
+        #(<<0x00, 0x01>>, GPSLatitudeRef),
+        #(<<0x00, 0x02>>, GPSLatitude),
+        #(<<0x00, 0x03>>, GPSLongitudeRef),
+        #(<<0x00, 0x04>>, GPSLongitude),
+        #(<<0x00, 0x05>>, GPSAltitudeRef),
+        #(<<0x00, 0x06>>, GPSAltitude),
+      ])
+  }
 }
 
 fn parse_data_or_offset(
@@ -778,32 +1131,32 @@ fn parse_data_or_offset(
 
 fn flash_tag_map() {
   dict.from_list([
-    #(<<0x00, 0x00>>, exif_tag.NoFlash),
-    #(<<0x00, 0x01>>, exif_tag.Fired),
-    #(<<0x00, 0x05>>, exif_tag.FiredReturnNotDetected),
-    #(<<0x00, 0x07>>, exif_tag.FiredReturnDetected),
-    #(<<0x00, 0x08>>, exif_tag.OnDidNotFire),
-    #(<<0x00, 0x09>>, exif_tag.OnFired),
-    #(<<0x00, 0x0d>>, exif_tag.OnReturnNotDetected),
-    #(<<0x00, 0x0f>>, exif_tag.OnReturnDetected),
-    #(<<0x00, 0x10>>, exif_tag.OffDidNotFire),
-    #(<<0x00, 0x14>>, exif_tag.OffDidNotFireReturnNotDetected),
-    #(<<0x00, 0x18>>, exif_tag.AutoDidNotFire),
-    #(<<0x00, 0x19>>, exif_tag.AutoFired),
-    #(<<0x00, 0x1d>>, exif_tag.AutoFiredReturnNotDetected),
-    #(<<0x00, 0x1f>>, exif_tag.AutoFiredReturnDetected),
-    #(<<0x00, 0x20>>, exif_tag.NoFlashFunction),
-    #(<<0x00, 0x30>>, exif_tag.OffNoFlashFunction),
-    #(<<0x00, 0x41>>, exif_tag.FiredRedEyeReduction),
-    #(<<0x00, 0x45>>, exif_tag.FiredRedEyeReductionReturnNotDetected),
-    #(<<0x00, 0x47>>, exif_tag.FiredRedEyeReductionReturnDetected),
-    #(<<0x00, 0x49>>, exif_tag.OnRedEyeReduction),
-    #(<<0x00, 0x4d>>, exif_tag.OnRedEyeReductionReturnNotDetected),
-    #(<<0x00, 0x4f>>, exif_tag.OnRedEyeReductionReturnDetected),
-    #(<<0x00, 0x50>>, exif_tag.OffRedEyeReduction),
-    #(<<0x00, 0x58>>, exif_tag.AutoDidNotFireRedEyeReduction),
-    #(<<0x00, 0x59>>, exif_tag.AutoFiredRedEyeReduction),
-    #(<<0x00, 0x5d>>, exif_tag.AutoFiredRedEyeReductionReturnNotDetected),
-    #(<<0x00, 0x5f>>, exif_tag.AutoFiredRedEyeReductionReturnDetected),
+    #(<<0x00, 0x00>>, flash.NoFlash),
+    #(<<0x00, 0x01>>, flash.Fired),
+    #(<<0x00, 0x05>>, flash.FiredReturnNotDetected),
+    #(<<0x00, 0x07>>, flash.FiredReturnDetected),
+    #(<<0x00, 0x08>>, flash.OnDidNotFire),
+    #(<<0x00, 0x09>>, flash.OnFired),
+    #(<<0x00, 0x0d>>, flash.OnReturnNotDetected),
+    #(<<0x00, 0x0f>>, flash.OnReturnDetected),
+    #(<<0x00, 0x10>>, flash.OffDidNotFire),
+    #(<<0x00, 0x14>>, flash.OffDidNotFireReturnNotDetected),
+    #(<<0x00, 0x18>>, flash.AutoDidNotFire),
+    #(<<0x00, 0x19>>, flash.AutoFired),
+    #(<<0x00, 0x1d>>, flash.AutoFiredReturnNotDetected),
+    #(<<0x00, 0x1f>>, flash.AutoFiredReturnDetected),
+    #(<<0x00, 0x20>>, flash.NoFlashFunction),
+    #(<<0x00, 0x30>>, flash.OffNoFlashFunction),
+    #(<<0x00, 0x41>>, flash.FiredRedEyeReduction),
+    #(<<0x00, 0x45>>, flash.FiredRedEyeReductionReturnNotDetected),
+    #(<<0x00, 0x47>>, flash.FiredRedEyeReductionReturnDetected),
+    #(<<0x00, 0x49>>, flash.OnRedEyeReduction),
+    #(<<0x00, 0x4d>>, flash.OnRedEyeReductionReturnNotDetected),
+    #(<<0x00, 0x4f>>, flash.OnRedEyeReductionReturnDetected),
+    #(<<0x00, 0x50>>, flash.OffRedEyeReduction),
+    #(<<0x00, 0x58>>, flash.AutoDidNotFireRedEyeReduction),
+    #(<<0x00, 0x59>>, flash.AutoFiredRedEyeReduction),
+    #(<<0x00, 0x5d>>, flash.AutoFiredRedEyeReductionReturnNotDetected),
+    #(<<0x00, 0x5f>>, flash.AutoFiredRedEyeReductionReturnDetected),
   ])
 }

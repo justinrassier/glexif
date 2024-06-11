@@ -1,8 +1,8 @@
 import file_streams/read_stream
-import glexif/exif_tag.{type ExifTag}
+import glexif/exif_tag
 import glexif/internal/raw
 
-pub fn get_exif_data_for_file(file_path) -> List(ExifTag) {
+pub fn get_exif_data_for_file(file_path) -> exif_tag.ExifTagRecord {
   let assert Ok(rs) = read_stream.open(file_path)
   // Move the stream up until you hit the exif marker
   let _ = raw.read_until_marker(rs)
@@ -15,7 +15,7 @@ pub fn get_exif_data_for_file(file_path) -> List(ExifTag) {
   // I am not sure at this point if there are multiple exif segments to a file
   // so this may need to be updated to advance the read stream to the next segment 
   case raw.read_exif_segment(rs, size) {
-    Ok(segment) -> raw.parse_exif_data(segment)
-    _ -> []
+    Ok(segment) -> raw.parse_exif_data_as_record(segment)
+    _ -> panic
   }
 }

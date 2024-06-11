@@ -1,240 +1,137 @@
-import gleam/dict
+import gleam/option.{type Option, None, Some}
+import glexif/exif_tags/color_space.{type ColorSpace}
+import glexif/exif_tags/components_configuration.{type ComponentsConfiguration}
+import glexif/exif_tags/composite_image.{type CompositeImage}
+import glexif/exif_tags/exposure_mode.{type ExposureMode}
+import glexif/exif_tags/exposure_program.{type ExposureProgram}
+import glexif/exif_tags/flash.{type Flash}
+import glexif/exif_tags/gps_altitude_ref.{type GPSAltitudeRef}
+import glexif/exif_tags/metering_mode.{type MeteringMode}
+import glexif/exif_tags/orientation.{type Orientation}
+import glexif/exif_tags/resolution_unit.{type ResolutionUnit}
+import glexif/exif_tags/scene_capture_type.{type SceneCaptureType}
+import glexif/exif_tags/scene_type.{type SceneType}
+import glexif/exif_tags/sensing_method.{type SensingMethod}
+import glexif/exif_tags/white_balance.{type WhiteBalance}
+import glexif/exif_tags/y_cb_cr_positioning.{type YCbCrPositioning}
+import glexif/units/fraction.{type Fraction}
+import glexif/units/gps_coordinates.{type GPSCoordinates}
 
-pub type ExifTag {
-  Make(String)
-  Model(String)
-  Orientation(Orientation)
-  XResolution(Int)
-  YResolution(Int)
-  ResolutionUnit(ResolutionUnit)
-  Software(String)
-  ModifyDate(String)
-  HostComputer(String)
-  YCbCrPositioning(YCbCrPositioning)
-  ExposureTime(Fraction)
-  FNumber(Fraction)
-  ExposureProgram(ExposureProgram)
-  ISO(Int)
-  ExifVersion(String)
-  DateTimeOriginal(String)
-  CreateDate(String)
-  OffsetTime(String)
-  OffsetTimeOriginal(String)
-  OffsetTimeDigitized(String)
-  ComponentsConfiguration(List(ComponentsConfiguration))
-  ShutterSpeedValue(Fraction)
-  ApertureValue(Fraction)
-  BrightnessValue(Float)
-  ExposureCompensation(Fraction)
-  MeteringMode(MeteringMode)
-  Flash(Flash)
-  FocalLength(Float)
-  SubjectArea(List(Int))
-  MakerData(TBD)
-  SubSecTimeOriginal(String)
-  SubSecTimeDigitized(String)
-  FlashpixVersion(String)
-  ColorSpace(ColorSpace)
-  ExifImageWidth(Int)
-  ExifImageHeight(Int)
-  SensingMethod(SensingMethod)
-  SceneType(SceneType)
-  Unknown
+pub type ExifTagRecord {
+  ExifTagRecord(
+    make: Option(String),
+    model: Option(String),
+    orientation: Option(Orientation),
+    x_resolution: Option(Int),
+    y_resolution: Option(Int),
+    resolution_unit: Option(ResolutionUnit),
+    software: Option(String),
+    modify_date: Option(String),
+    host_computer: Option(String),
+    y_cb_cr_positioning: Option(YCbCrPositioning),
+    exposure_time: Option(Fraction),
+    f_number: Option(Fraction),
+    exposure_program: Option(ExposureProgram),
+    iso: Option(Int),
+    exif_version: Option(String),
+    date_time_original: Option(String),
+    create_date: Option(String),
+    offset_time: Option(String),
+    offset_time_original: Option(String),
+    offset_time_digitized: Option(String),
+    components_configuration: Option(List(ComponentsConfiguration)),
+    shutter_speed_value: Option(Fraction),
+    aperature_value: Option(Fraction),
+    brightness_value: Option(Float),
+    exposure_compensation: Option(Fraction),
+    metering_mode: Option(MeteringMode),
+    flash: Option(Flash),
+    focal_length: Option(Float),
+    subject_area: Option(List(Int)),
+    maker_data: Option(TBD),
+    sub_sec_time_original: Option(String),
+    sub_sec_time_digitized: Option(String),
+    flash_pix_version: Option(String),
+    color_space: Option(ColorSpace),
+    exif_image_width: Option(Int),
+    exif_image_height: Option(Int),
+    sensing_method: Option(SensingMethod),
+    scene_type: Option(SceneType),
+    exposure_mode: Option(ExposureMode),
+    white_balance: Option(WhiteBalance),
+    focal_length_in_35_mm_format: Option(Int),
+    scene_capture_type: Option(SceneCaptureType),
+    lens_info: Option(List(Fraction)),
+    lens_make: Option(String),
+    lens_model: Option(String),
+    composite_image: Option(CompositeImage),
+    gps_latitude_ref: Option(String),
+    gps_latitude: Option(GPSCoordinates),
+    gps_longitude_ref: Option(String),
+    gps_longitude: Option(GPSCoordinates),
+    gps_altitude_ref: Option(GPSAltitudeRef),
+    gps_altitude: Option(Float),
+  )
 }
 
+pub fn new() -> ExifTagRecord {
+  ExifTagRecord(
+    make: None,
+    model: None,
+    orientation: None,
+    x_resolution: None,
+    y_resolution: None,
+    resolution_unit: None,
+    software: None,
+    modify_date: None,
+    host_computer: None,
+    y_cb_cr_positioning: None,
+    exposure_time: None,
+    f_number: None,
+    exposure_program: None,
+    iso: None,
+    exif_version: None,
+    date_time_original: None,
+    create_date: None,
+    offset_time: None,
+    offset_time_original: None,
+    offset_time_digitized: None,
+    components_configuration: None,
+    shutter_speed_value: None,
+    aperature_value: None,
+    brightness_value: None,
+    exposure_compensation: None,
+    metering_mode: None,
+    flash: None,
+    focal_length: None,
+    subject_area: None,
+    maker_data: None,
+    sub_sec_time_original: None,
+    sub_sec_time_digitized: None,
+    flash_pix_version: None,
+    color_space: None,
+    exif_image_width: None,
+    exif_image_height: None,
+    sensing_method: None,
+    scene_type: None,
+    exposure_mode: None,
+    white_balance: None,
+    focal_length_in_35_mm_format: None,
+    scene_capture_type: None,
+    lens_info: None,
+    lens_make: None,
+    lens_model: None,
+    composite_image: None,
+    gps_latitude_ref: None,
+    gps_latitude: None,
+    gps_longitude_ref: None,
+    gps_longitude: None,
+    gps_altitude_ref: None,
+    gps_altitude: None,
+  )
+}
+
+/// Unparsed data that has to be figured out
 pub type TBD {
   TBD
-}
-
-// 1 = Horizontal (normal)
-// 2 = Mirror horizontal
-// 3 = Rotate 180
-// 4 = Mirror vertical
-// 5 = Mirror horizontal and rotate 270 CW
-// 6 = Rotate 90 CW
-// 7 = Mirror horizontal and rotate 90 CW
-// 8 = Rotate 270 CW
-pub type Orientation {
-  Horizontal
-  MirrorHorizontal
-  Rotate180
-  MirrorVertical
-  MirrorHorizontalAndRotate270CW
-  Rotate90CW
-  MirrorHorizontalAndRotate90CW
-  Rotate270CW
-  InvalidOrientation
-}
-
-pub type ResolutionUnit {
-  None
-  Inches
-  Centimeters
-  InvalidResolutionUnit
-}
-
-pub type YCbCrPositioning {
-  Centered
-  CoSited
-  InvalidYCbCrPositioning
-}
-
-pub type Fraction {
-  Fraction(numerator: Int, denominator: Int)
-}
-
-// 0 = Not Defined
-// 1 = Manual
-// 2 = Program AE
-// 3 = Aperture-priority AE
-// 4 = Shutter speed priority AE
-// 5 = Creative (Slow speed)
-// 6 = Action (High speed)
-// 7 = Portrait
-// 8 = Landscape
-// 9 = Bulb
-pub type ExposureProgram {
-  NotDefined
-  Manual
-  ProgramAE
-  AperturePriorityAE
-  ShutterSpeedPriorityAE
-  Creative
-  Action
-  Portrait
-  Landscape
-  Bulb
-  InvalidExposureProgram
-}
-
-// 	
-// 0 = -
-// 1 = Y
-// 2 = Cb
-// 3 = Cr	  	4 = R
-// 5 = G
-// 6 = B
-pub type ComponentsConfiguration {
-  Y
-  Cb
-  Cr
-  R
-  G
-  B
-  NA
-  InvalidComponentsConfiguration
-}
-
-// 0 = Unknown
-// 1 = Average
-// 2 = Center-weighted average
-// 3 = Spot
-// 4 = Multi-spot
-// 5 = Multi-segment
-// 6 = Partial
-// 255 = Other
-pub type MeteringMode {
-  UnknownMeteringMode
-  Average
-  CenterWeightedAverage
-  Spot
-  MultiSpot
-  MultiSegement
-  Partial
-  Other
-  InvalidMeteringMode
-}
-
-// 0x0	= No Flash
-// 0x1	= Fired
-// 0x5	= Fired, Return not detected
-// 0x7	= Fired, Return detected
-// 0x8	= On, Did not fire
-// 0x9	= On, Fired
-// 0xd	= On, Return not detected
-// 0xf	= On, Return detected
-// 0x10	= Off, Did not fire
-// 0x14	= Off, Did not fire, Return not detected
-// 0x18	= Auto, Did not fire
-// 0x19	= Auto, Fired
-// 0x1d	= Auto, Fired, Return not detected
-// 0x1f	= Auto, Fired, Return detected
-// 0x20	= No flash function
-// 0x30	= Off, No flash function
-// 0x41	= Fired, Red-eye reduction
-// 0x45	= Fired, Red-eye reduction, Return not detected
-// 0x47	= Fired, Red-eye reduction, Return detected
-// 0x49	= On, Red-eye reduction
-// 0x4d	= On, Red-eye reduction, Return not detected
-// 0x4f	= On, Red-eye reduction, Return detected
-// 0x50	= Off, Red-eye reduction
-// 0x58	= Auto, Did not fire, Red-eye reduction
-// 0x59	= Auto, Fired, Red-eye reduction
-// 0x5d	= Auto, Fired, Red-eye reduction, Return not detected
-// 0x5f	= Auto, Fired, Red-eye reduction, Return detected
-pub type Flash {
-  NoFlash
-  Fired
-  FiredReturnNotDetected
-  FiredReturnDetected
-  OnDidNotFire
-  OnFired
-  OnReturnNotDetected
-  OnReturnDetected
-  OffDidNotFire
-  OffDidNotFireReturnNotDetected
-  AutoDidNotFire
-  AutoFired
-  AutoFiredReturnNotDetected
-  AutoFiredReturnDetected
-  NoFlashFunction
-  OffNoFlashFunction
-  FiredRedEyeReduction
-  FiredRedEyeReductionReturnNotDetected
-  FiredRedEyeReductionReturnDetected
-  OnRedEyeReduction
-  OnRedEyeReductionReturnNotDetected
-  OnRedEyeReductionReturnDetected
-  OffRedEyeReduction
-  AutoDidNotFireRedEyeReduction
-  AutoFiredRedEyeReduction
-  AutoFiredRedEyeReductionReturnNotDetected
-  AutoFiredRedEyeReductionReturnDetected
-  InvalidFlash
-}
-
-// 0x1 = sRGB
-// 0x2 = Adobe RGB
-// 0xfffd = Wide Gamut RGB
-// 0xfffe = ICC Profile
-// 0xffff = Uncalibrated
-pub type ColorSpace {
-  SRGB
-  AdobeRGB
-  WideGamutRGB
-  ICCProfile
-  Uncalibrated
-  InvalidColorSpace
-}
-
-// 1 = Not defined
-// 2 = One-chip color area
-// 3 = Two-chip color area
-// 4 = Three-chip color area
-// 5 = Color sequential area
-// 7 = Trilinear
-// 8 = Color sequential linear
-pub type SensingMethod {
-  SensingMethodNotDefined
-  OneChipColorArea
-  TwoChipColorArea
-  ThreeChipColorArea
-  ColorSequentialArea
-  Trilinear
-  ColorSequentialLinear
-  InvalidSensingMethod
-}
-
-pub type SceneType {
-  DirectlyPhotographed
 }
