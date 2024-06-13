@@ -1,0 +1,99 @@
+ExifTool Version Number         : 12.84
+File Name                       : intel.jpeg
+Directory                       : ./test/fixtures
+File Size                       : 5.3 MB
+File Modification Date/Time     : 2024:06:10 21:24:10-05:00
+File Access Date/Time           : 2024:06:12 20:29:13-05:00
+File Inode Change Date/Time     : 2024:06:12 20:29:12-05:00
+File Permissions                : -rw-------
+File Type                       : JPEG
+File Type Extension             : jpg
+MIME Type                       : image/jpeg
+Exif Byte Order                 : Little-endian (Intel, II)
+Image Description               : 
+Make                            : SONY
+Camera Model Name               : DSC-W350
+Orientation                     : Horizontal (normal)
+X Resolution                    : 72
+Y Resolution                    : 72
+Resolution Unit                 : inches
+Modify Date                     : 2010:01:01 14:20:19
+Y Cb Cr Positioning             : Co-sited
+Exposure Time                   : 1/30
+F Number                        : 2.7
+Exposure Program                : Program AE
+ISO                             : 320
+Exif Version                    : 0221
+Date/Time Original              : 2010:01:01 14:20:19
+Create Date                     : 2010:01:01 14:20:19
+Components Configuration        : Y, Cb, Cr, -
+Compressed Bits Per Pixel       : 4
+Exposure Compensation           : 0
+Max Aperture Value              : 2.7
+Metering Mode                   : Multi-segment
+Light Source                    : Unknown
+Flash                           : Auto, Did not fire
+Focal Length                    : 4.7 mm
+HDR                             : Off; Uncorrected image
+Face Info Offset                : 72
+Sony Date Time                  : 2010:01:01 14:20:19
+Sony Image Height               : 3240
+Sony Image Width                : 4320
+Faces Detected                  : 0
+Face Info Length                : 32
+Meta Version                    : DC6303320222000
+Creative Style                  : Standard
+Macro                           : Off
+Focus Mode                      : Permanent-AF
+AF Area Mode                    : Multi
+AF Illuminator                  : Auto
+JPEG Quality                    : Standard
+Flash Level                     : Normal
+Release Mode                    : Normal
+Sequence Number                 : Single
+Anti-Blur                       : On (Shooting)
+Dynamic Range Optimizer         : Standard
+High ISO Noise Reduction 2      : Normal
+Intelligent Auto                : On
+White Balance                   : Auto
+Flashpix Version                : 0100
+Color Space                     : sRGB
+Exif Image Width                : 4320
+Exif Image Height               : 3240
+Interoperability Index          : R98 - DCF basic file (sRGB)
+Interoperability Version        : 0100
+File Source                     : Digital Camera
+Scene Type                      : Directly photographed
+Custom Rendered                 : Normal
+Exposure Mode                   : Auto
+Scene Capture Type              : Standard
+Contrast                        : Normal
+Saturation                      : Normal
+Sharpness                       : Normal
+PrintIM Version                 : 0300
+Compression                     : JPEG (old-style)
+Thumbnail Offset                : 10924
+Thumbnail Length                : 12832
+MPF Version                     : 0100
+Number Of Images                : 2
+MP Image Flags                  : Dependent child image
+MP Image Format                 : JPEG
+MP Image Type                   : Large Thumbnail (full HD equivalent)
+MP Image Length                 : 679135
+MP Image Start                  : 4597642
+Dependent Image 1 Entry Number  : 0
+Dependent Image 2 Entry Number  : 0
+Image Width                     : 4320
+Image Height                    : 3240
+Encoding Process                : Baseline DCT, Huffman coding
+Bits Per Sample                 : 8
+Color Components                : 3
+Y Cb Cr Sub Sampling            : YCbCr4:2:2 (2 1)
+Aperture                        : 2.7
+Image Size                      : 4320x3240
+Megapixels                      : 14.0
+Shutter Speed                   : 1/30
+Thumbnail Image                 : (Binary data 12832 bytes, use -b option to extract)
+Preview Image                   : (Binary data 679135 bytes, use -b option to extract)
+Focal Length                    : 4.7 mm
+Light Value                     : 6.1

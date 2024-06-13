@@ -6,6 +6,7 @@ import glexif/exif_tags/exposure_mode.{type ExposureMode}
 import glexif/exif_tags/exposure_program.{type ExposureProgram}
 import glexif/exif_tags/flash.{type Flash}
 import glexif/exif_tags/gps_altitude_ref.{type GPSAltitudeRef}
+import glexif/exif_tags/gps_speed_ref.{type GPSSpeedRef}
 import glexif/exif_tags/metering_mode.{type MeteringMode}
 import glexif/exif_tags/orientation.{type Orientation}
 import glexif/exif_tags/resolution_unit.{type ResolutionUnit}
@@ -19,6 +20,7 @@ import glexif/units/gps_coordinates.{type GPSCoordinates}
 
 pub type ExifTagRecord {
   ExifTagRecord(
+    image_description: Option(String),
     make: Option(String),
     model: Option(String),
     orientation: Option(Orientation),
@@ -71,11 +73,15 @@ pub type ExifTagRecord {
     gps_longitude: Option(GPSCoordinates),
     gps_altitude_ref: Option(GPSAltitudeRef),
     gps_altitude: Option(Float),
+    gps_timestamp: Option(String),
+    gps_speed_ref: Option(GPSSpeedRef),
+    gps_speed: Option(Float),
   )
 }
 
 pub fn new() -> ExifTagRecord {
   ExifTagRecord(
+    image_description: None,
     make: None,
     model: None,
     orientation: None,
@@ -128,6 +134,9 @@ pub fn new() -> ExifTagRecord {
     gps_longitude: None,
     gps_altitude_ref: None,
     gps_altitude: None,
+    gps_timestamp: None,
+    gps_speed_ref: None,
+    gps_speed: None,
   )
 }
 
