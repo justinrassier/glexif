@@ -11,10 +11,6 @@ See the below code snippet example for the currently supported tags that are par
 
 ## Limitations
 
-#### Only support for "Motorola" EXIF format
-
-EXIF metadata come in two formats. This library was built starting to parse out a photo from an iPhone 14, which uses the "Motorola" format. I hope to expand support to the "Intel" style format soon if there ends up being interest.
-
 #### Limited parsing formats
 
 I definitely am not an expert in photography, so I have left some of the values in their raw form so that I can convert them to something more useful in the future (see the TODO comments in `glexif_test.gleam`). If you have any input on what would be useful for a consumer of the library, feel free to put in an issue!

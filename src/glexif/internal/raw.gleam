@@ -16,6 +16,7 @@ import glexif/exif_tags/exposure_mode
 import glexif/exif_tags/exposure_program
 import glexif/exif_tags/flash
 import glexif/exif_tags/gps_altitude_ref
+import glexif/exif_tags/gps_speed_ref
 import glexif/exif_tags/metering_mode
 import glexif/exif_tags/orientation
 import glexif/exif_tags/resolution_unit
@@ -24,6 +25,8 @@ import glexif/exif_tags/scene_type
 import glexif/exif_tags/sensing_method
 import glexif/exif_tags/white_balance
 import glexif/exif_tags/y_cb_cr_positioning
+import glexif/internal/flash as internal_flash
+import glexif/internal/orientation as internal_orientation
 
 import glexif/internal/utils
 import glexif/units/fraction.{type Fraction, Fraction}
@@ -72,6 +75,7 @@ pub type ExifSegment {
 }
 
 pub type RawExifTag {
+  ImageDescription
   Make
   Model
   Orientation
@@ -125,6 +129,9 @@ pub type RawExifTag {
   GPSLongitude
   GPSAltitudeRef
   GPSAltitude
+  GPSTimestamp
+  GPSSpeedRef
+  GPSSpeed
 
   GPSLink(Int)
   IFDLink(Int)
@@ -196,7 +203,14 @@ pub fn read_exif_segment(
   case exif_header_bytes, tiff_header_type {
     Ok(<<69, 120, 105, 102, 0, 0>>), Ok(tiff_header) ->
       case tiff_header {
-        Intel(_) -> panic as "Unimplemented parsing for Intel header"
+        Intel(_) -> {
+          Ok(ExifSegment(
+            size: exif_full_size,
+            exif_header: <<69, 120, 105, 102, 0, 0>>,
+            tiff_header: tiff_header,
+            raw_data: raw_data,
+          ))
+        }
         Motorola(_) -> {
           Ok(ExifSegment(
             size: exif_full_size,
@@ -228,20 +242,38 @@ pub fn parse_exif_data_as_record(
   let entry_count =
     bit_array.slice(exif_segment.raw_data, 8, 2)
     |> result.unwrap(<<0, 0>>)
+    |> fn(slice) {
+      case exif_segment.tiff_header {
+        Motorola(_) -> slice
+        Intel(_) -> utils.bit_array_reverse(slice)
+      }
+    }
     |> utils.bit_array_to_decimal
 
-  get_raw_entries(exif_segment.raw_data, 10, entry_count, 1, IFD)
+  get_raw_entries(
+    exif_segment.raw_data,
+    10,
+    entry_count,
+    1,
+    IFD,
+    exif_segment.tiff_header,
+  )
   |> list.fold(exif_tag.new(), fn(record, tag) {
-    raw_exif_entry_to_parsed_tag(record, tag)
+    raw_exif_entry_to_parsed_tag(record, tag, exif_segment.tiff_header)
   })
 }
 
+/// This method is the logic to recurse through
+/// all the entries in the raw data and try to extract all the necessary raw data
+/// pieces that are later used to format into a consumer friendly type
+///TODO: try to clean this up, it's pretty gnarly
 pub fn get_raw_entries(
   segment_bytes: BitArray,
   start: Int,
   total_segment_count: Int,
   current_entry: Int,
   offset_location: OffsetLocation,
+  tiff_header: TiffHeader,
 ) -> List(RawExifEntry) {
   let entry_bits = bit_array.slice(segment_bytes, start, 12)
 
@@ -251,28 +283,38 @@ pub fn get_raw_entries(
       current_entry,
       total_segment_count,
       offset_location,
+      tiff_header,
     )
 
   let data_type =
     entry_bits
     |> result.try(bit_array.slice(_, 2, 2))
+    |> try_reverse_if_intel(tiff_header)
     |> result.map(utils.bit_array_to_decimal)
     |> result.try(dict.get(exif_type_map(), _))
 
   let component_count =
     entry_bits
     |> result.try(bit_array.slice(_, 4, 4))
+    |> try_reverse_if_intel(tiff_header)
     |> result.map(utils.bit_array_to_decimal)
 
   let data =
     entry_bits
     |> result.try(bit_array.slice(_, 8, 4))
+    // reverse it before sending to parse it
+    |> try_reverse_if_intel(tiff_header)
     |> result.try(parse_data_or_offset(
       _,
       segment_bytes,
       data_type,
       result.unwrap(component_count, 0),
+      tiff_header,
     ))
+    // need to reverse it one more time to get back the right order since
+    // the parse_data_or_offset also had to do its own reverse. 
+    // Definitely should be a better way to do this, but it looks to work
+    |> try_reverse_if_intel(tiff_header)
 
   case tag, data_type, component_count, data {
     // In the case we hit the ExifOffset, this points us to a different offset location
@@ -281,12 +323,20 @@ pub fn get_raw_entries(
       let offset = utils.bit_array_to_decimal(data)
       let entry_count =
         bit_array.slice(segment_bytes, offset, 2)
+        |> try_reverse_if_intel(tiff_header)
         |> result.unwrap(<<0, 0>>)
         |> utils.bit_array_to_decimal
       // first 2 bytes is the number of elements.
       list.append(
         // recurse down the offset
-        get_raw_entries(segment_bytes, offset + 2, entry_count, 1, IFD),
+        get_raw_entries(
+          segment_bytes,
+          offset + 2,
+          entry_count,
+          1,
+          IFD,
+          tiff_header,
+        ),
         // continue recursing the current segment
         get_raw_entries(
           segment_bytes,
@@ -294,6 +344,7 @@ pub fn get_raw_entries(
           total_segment_count,
           current_entry + 1,
           offset_location,
+          tiff_header,
         ),
       )
     }
@@ -301,33 +352,51 @@ pub fn get_raw_entries(
     IFDLink(offset), _, _, _ -> {
       let entry_count =
         bit_array.slice(segment_bytes, offset, 2)
+        |> try_reverse_if_intel(tiff_header)
         |> result.unwrap(<<0, 0>>)
         |> utils.bit_array_to_decimal
       list.append(
-        get_raw_entries(segment_bytes, offset + 2, entry_count, 1, IFD),
+        get_raw_entries(
+          segment_bytes,
+          offset + 2,
+          entry_count,
+          1,
+          IFD,
+          tiff_header,
+        ),
         get_raw_entries(
           segment_bytes,
           start + 12,
           total_segment_count,
           current_entry + 1,
           offset_location,
+          tiff_header,
         ),
       )
     }
     GPSLink(offset), _, _, _ -> {
       let entry_count =
         bit_array.slice(segment_bytes, offset, 2)
+        |> try_reverse_if_intel(tiff_header)
         |> result.unwrap(<<0, 0>>)
         |> utils.bit_array_to_decimal
 
       list.append(
-        get_raw_entries(segment_bytes, offset + 2, entry_count, 1, GPS),
+        get_raw_entries(
+          segment_bytes,
+          offset + 2,
+          entry_count,
+          1,
+          GPS,
+          tiff_header,
+        ),
         get_raw_entries(
           segment_bytes,
           start + 12,
           total_segment_count,
           current_entry + 1,
           offset_location,
+          tiff_header,
         ),
       )
     }
@@ -350,6 +419,7 @@ pub fn get_raw_entries(
           total_segment_count,
           current_entry + 1,
           offset_location,
+          tiff_header,
         ),
       )
     }
@@ -365,11 +435,13 @@ fn parse_raw_exif_tag(
   current_entry_count: Int,
   total_segment_count: Int,
   offset_location: OffsetLocation,
+  tiff_header: TiffHeader,
 ) -> RawExifTag {
   // the one segment past the last segment is either offset to a new link or the end of things
   let end_or_offset_index = total_segment_count + 1
   entry
   |> result.try(bit_array.slice(_, 0, 2))
+  |> try_reverse_if_intel(tiff_header)
   |> result.try(dict.get(exif_tag_map(offset_location), _))
   |> result.try_recover(fn(_) {
     case entry {
@@ -412,8 +484,17 @@ fn parse_raw_exif_tag(
 pub fn raw_exif_entry_to_parsed_tag(
   record: exif_tag.ExifTagRecord,
   entry: RawExifEntry,
+  tiff_header: TiffHeader,
 ) -> exif_tag.ExifTagRecord {
   case entry.tag {
+    ImageDescription -> {
+      let image_description =
+        entry.data
+        |> extract_ascii_data
+        |> Some
+
+      exif_tag.ExifTagRecord(..record, image_description: image_description)
+    }
     Make -> {
       let make =
         entry.data
@@ -434,7 +515,7 @@ pub fn raw_exif_entry_to_parsed_tag(
       let orientation =
         entry
         |> extract_integer_data
-        |> dict.get(exif_orientation_map(), _)
+        |> dict.get(internal_orientation.exif_orientation_map(), _)
         |> result.unwrap(orientation.InvalidOrientation)
         |> Some
 
@@ -494,12 +575,14 @@ pub fn raw_exif_entry_to_parsed_tag(
       exif_tag.ExifTagRecord(..record, y_cb_cr_positioning: Some(positioning))
     }
     ExposureTime -> {
-      let exposure_time = extract_unsigned_rational_to_fraction(entry.data)
+      let exposure_time =
+        extract_unsigned_rational_to_fraction(entry.data, tiff_header)
       exif_tag.ExifTagRecord(..record, exposure_time: Some(exposure_time))
     }
 
     FNumber -> {
-      let f_number = extract_unsigned_rational_to_fraction(entry.data)
+      let f_number =
+        extract_unsigned_rational_to_fraction(entry.data, tiff_header)
       exif_tag.ExifTagRecord(..record, f_number: Some(f_number))
     }
     ExposureProgram -> {
@@ -601,7 +684,7 @@ pub fn raw_exif_entry_to_parsed_tag(
 
     BrightnessValue -> {
       let Fraction(numerator, denominator) =
-        extract_unsigned_rational_to_fraction(entry.data)
+        extract_unsigned_rational_to_fraction(entry.data, tiff_header)
       let brightness_value =
         int.to_float(numerator) /. int.to_float(denominator)
 
@@ -610,7 +693,7 @@ pub fn raw_exif_entry_to_parsed_tag(
 
     ExposureCompensation -> {
       let exposure_compensation =
-        extract_unsigned_rational_to_fraction(entry.data)
+        extract_unsigned_rational_to_fraction(entry.data, tiff_header)
       exif_tag.ExifTagRecord(
         ..record,
         exposure_compensation: Some(exposure_compensation),
@@ -635,7 +718,7 @@ pub fn raw_exif_entry_to_parsed_tag(
     Flash -> {
       let flash =
         bit_array.slice(entry.data, 0, 2)
-        |> result.try(dict.get(flash_tag_map(), _))
+        |> result.try(dict.get(internal_flash.flash_tag_map(), _))
         |> result.unwrap(flash.InvalidFlash)
 
       exif_tag.ExifTagRecord(..record, flash: Some(flash))
@@ -643,7 +726,7 @@ pub fn raw_exif_entry_to_parsed_tag(
 
     FocalLength -> {
       let Fraction(numerator, denominator) =
-        extract_unsigned_rational_to_fraction(entry.data)
+        extract_unsigned_rational_to_fraction(entry.data, tiff_header)
 
       let focal_length = int.to_float(numerator) /. int.to_float(denominator)
 
@@ -876,13 +959,47 @@ pub fn raw_exif_entry_to_parsed_tag(
     }
     GPSAltitude -> {
       let gps_altitude_fraction =
-        extract_unsigned_rational_to_fraction(entry.data)
+        extract_unsigned_rational_to_fraction(entry.data, tiff_header)
       let gps_altitude_float = case gps_altitude_fraction {
         Fraction(numerator, denominator) ->
           int.to_float(numerator) /. int.to_float(denominator)
       }
 
       exif_tag.ExifTagRecord(..record, gps_altitude: Some(gps_altitude_float))
+    }
+    GPSTimestamp -> {
+      let fraction_list = bit_array_to_fraction_list(entry.data)
+      let gps_timestamp = case fraction_list {
+        [Fraction(n1, _), Fraction(n2, _), Fraction(n3, _)] ->
+          int.to_string(n1)
+          <> ":"
+          <> int.to_string(n2)
+          <> ":"
+          <> int.to_string(n3)
+        _ -> "Invalid"
+      }
+      exif_tag.ExifTagRecord(..record, gps_timestamp: Some(gps_timestamp))
+    }
+    GPSSpeedRef -> {
+      let gps_speed_ref_string = extract_ascii_data(entry.data)
+      let gps_speed_ref = case gps_speed_ref_string {
+        "K" -> gps_speed_ref.KilometersPerHour
+        "M" -> gps_speed_ref.MilesPerHour
+        "N" -> gps_speed_ref.Knots
+        _ -> gps_speed_ref.InvalidGPSSpeedRef
+      }
+
+      exif_tag.ExifTagRecord(..record, gps_speed_ref: Some(gps_speed_ref))
+    }
+    GPSSpeed -> {
+      let gps_speed_fraction =
+        extract_unsigned_rational_to_fraction(entry.data, tiff_header)
+      let gps_speed = case gps_speed_fraction {
+        Fraction(numerator, denominator) ->
+          int.to_float(numerator) /. int.to_float(denominator)
+      }
+
+      exif_tag.ExifTagRecord(..record, gps_speed: Some(gps_speed))
     }
 
     u -> {
@@ -923,19 +1040,6 @@ fn extract_unsigned_short_to_int_list(
   }
 }
 
-fn exif_orientation_map() {
-  dict.from_list([
-    #(1, orientation.Horizontal),
-    #(2, orientation.MirrorHorizontal),
-    #(3, orientation.Rotate180),
-    #(4, orientation.MirrorVertical),
-    #(5, orientation.MirrorHorizontalAndRotate270CW),
-    #(6, orientation.Rotate90CW),
-    #(7, orientation.MirrorHorizontalAndRotate90CW),
-    #(8, orientation.Rotate270CW),
-  ])
-}
-
 fn exif_type_map() {
   // lookup map from the decimal value to the type. The type holds the number of bytes per entry
   dict.from_list([
@@ -966,7 +1070,7 @@ fn extract_ascii_data(data: BitArray) -> String {
 /// of decimal and convert them
 fn extract_integer_data(exif_entry: RawExifEntry) -> Int {
   case exif_entry.data_type {
-    UnsignedShort(size) ->
+    UnsignedShort(size) | UnsignedLong(size) ->
       bit_array.slice(exif_entry.data, 0, size * exif_entry.component_count)
       |> result.unwrap(<<>>)
       |> utils.bit_array_to_decimal
@@ -984,23 +1088,24 @@ fn extract_integer_data(exif_entry: RawExifEntry) -> Int {
 
       numerator / denominator
     }
-    UnsignedLong(size) ->
-      bit_array.slice(exif_entry.data, 0, size * exif_entry.component_count)
-      |> result.unwrap(<<>>)
-      |> utils.bit_array_to_decimal
     _ -> panic as "unimplemented data type"
   }
 }
 
-fn extract_unsigned_rational_to_fraction(data: BitArray) -> Fraction {
+fn extract_unsigned_rational_to_fraction(
+  data: BitArray,
+  tiff_header: TiffHeader,
+) -> Fraction {
   let numerator =
     data
     |> bit_array.slice(0, 4)
+    |> try_reverse_if_intel(tiff_header)
     |> result.map(utils.bit_array_to_decimal)
     |> result.unwrap(0)
   let denominator =
     data
     |> bit_array.slice(4, 4)
+    |> try_reverse_if_intel(tiff_header)
     |> result.map(utils.bit_array_to_decimal)
     |> result.unwrap(0)
 
@@ -1044,6 +1149,7 @@ fn exif_tag_map(offset_location: OffsetLocation) {
   case offset_location {
     IFD ->
       dict.from_list([
+        #(<<0x01, 0x0e>>, ImageDescription),
         #(<<0x01, 0x0f>>, Make),
         #(<<0x01, 0x10>>, Model),
         #(<<0x01, 0x12>>, Orientation),
@@ -1102,6 +1208,9 @@ fn exif_tag_map(offset_location: OffsetLocation) {
         #(<<0x00, 0x04>>, GPSLongitude),
         #(<<0x00, 0x05>>, GPSAltitudeRef),
         #(<<0x00, 0x06>>, GPSAltitude),
+        #(<<0x00, 0x07>>, GPSTimestamp),
+        #(<<0x00, 0x0c>>, GPSSpeedRef),
+        #(<<0x00, 0x0d>>, GPSSpeed),
       ])
   }
 }
@@ -1111,6 +1220,7 @@ fn parse_data_or_offset(
   full_segment: BitArray,
   data_type: Result(RawExifType, Nil),
   component_count: Int,
+  tiff_header: TiffHeader,
 ) -> Result(BitArray, Nil) {
   let dt = result.unwrap(data_type, Unknown(0))
 
@@ -1121,42 +1231,30 @@ fn parse_data_or_offset(
       let offset = utils.bit_array_to_decimal(data_or_offset)
       case t.bytes {
         // data is in the array already
-        _bytes if size <= 4 -> Ok(d)
+        _bytes if size <= 4 -> {
+          reverse_if_intel(d, tiff_header)
+          |> bit_array.slice(0, size)
+        }
         //otherwise it contains the offset
-        _ -> bit_array.slice(full_segment, offset, size)
+        _ ->
+          bit_array.slice(full_segment, offset, size)
+          |> try_reverse_if_intel(tiff_header)
       }
     }
   }
 }
 
-fn flash_tag_map() {
-  dict.from_list([
-    #(<<0x00, 0x00>>, flash.NoFlash),
-    #(<<0x00, 0x01>>, flash.Fired),
-    #(<<0x00, 0x05>>, flash.FiredReturnNotDetected),
-    #(<<0x00, 0x07>>, flash.FiredReturnDetected),
-    #(<<0x00, 0x08>>, flash.OnDidNotFire),
-    #(<<0x00, 0x09>>, flash.OnFired),
-    #(<<0x00, 0x0d>>, flash.OnReturnNotDetected),
-    #(<<0x00, 0x0f>>, flash.OnReturnDetected),
-    #(<<0x00, 0x10>>, flash.OffDidNotFire),
-    #(<<0x00, 0x14>>, flash.OffDidNotFireReturnNotDetected),
-    #(<<0x00, 0x18>>, flash.AutoDidNotFire),
-    #(<<0x00, 0x19>>, flash.AutoFired),
-    #(<<0x00, 0x1d>>, flash.AutoFiredReturnNotDetected),
-    #(<<0x00, 0x1f>>, flash.AutoFiredReturnDetected),
-    #(<<0x00, 0x20>>, flash.NoFlashFunction),
-    #(<<0x00, 0x30>>, flash.OffNoFlashFunction),
-    #(<<0x00, 0x41>>, flash.FiredRedEyeReduction),
-    #(<<0x00, 0x45>>, flash.FiredRedEyeReductionReturnNotDetected),
-    #(<<0x00, 0x47>>, flash.FiredRedEyeReductionReturnDetected),
-    #(<<0x00, 0x49>>, flash.OnRedEyeReduction),
-    #(<<0x00, 0x4d>>, flash.OnRedEyeReductionReturnNotDetected),
-    #(<<0x00, 0x4f>>, flash.OnRedEyeReductionReturnDetected),
-    #(<<0x00, 0x50>>, flash.OffRedEyeReduction),
-    #(<<0x00, 0x58>>, flash.AutoDidNotFireRedEyeReduction),
-    #(<<0x00, 0x59>>, flash.AutoFiredRedEyeReduction),
-    #(<<0x00, 0x5d>>, flash.AutoFiredRedEyeReductionReturnNotDetected),
-    #(<<0x00, 0x5f>>, flash.AutoFiredRedEyeReductionReturnDetected),
-  ])
+fn try_reverse_if_intel(
+  bit_array: Result(BitArray, Nil),
+  tiff_header: TiffHeader,
+) -> Result(BitArray, Nil) {
+  bit_array
+  |> result.try(fn(slice) { Ok(reverse_if_intel(slice, tiff_header)) })
+}
+
+fn reverse_if_intel(bit_array: BitArray, tiff_header: TiffHeader) -> BitArray {
+  case tiff_header {
+    Intel(_) -> utils.bit_array_reverse(bit_array)
+    Motorola(_) -> bit_array
+  }
 }

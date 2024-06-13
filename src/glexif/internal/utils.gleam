@@ -39,3 +39,10 @@ fn trim_trailing_zeros(str: BitArray) -> BitArray {
     _ -> str
   }
 }
+
+pub fn bit_array_reverse(b: BitArray) -> BitArray {
+  case b {
+    <<a, b:bits>> -> bit_array.concat([bit_array_reverse(b), <<a>>])
+    _ -> <<>>
+  }
+}
