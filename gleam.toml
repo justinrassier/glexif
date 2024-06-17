@@ -1,5 +1,5 @@
 name = "glexif"
-version = "0.0.1"
+version = "0.0.2"
 description = "A library for reading Exif data in JPEG files."
 licences = ["MIT"]
 
