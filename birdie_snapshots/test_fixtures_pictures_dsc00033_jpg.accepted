@@ -1,0 +1,34 @@
+---
+version: 1.1.6
+title: test/fixtures/pictures/DSC00033.JPG
+---
+ExifTagRecordSimple(
+  Some("                               "),
+  Some("SONY"),
+  Some("DSC-W350"),
+  Some(Horizontal),
+  Some(72),
+  Some(72),
+  Some(Inches),
+  None,
+  Some("2010:01:15 18:06:25"),
+  None,
+  Some(CoSited),
+  Some(Fraction(1, 160)),
+  Some(9.0),
+  Some(ProgramAe),
+  Some(80),
+  Some("0221"),
+  Some("2010:01:15 18:06:25"),
+  Some("2010:01:15 18:06:25"),
+  None,
+  None,
+  None,
+  Some([Y, Cb, Cr, Na]),
+  None,
+  None,
+  Some(0.0),
+  Some(MultiSegement),
+  Some(AutoDidNotFire),
+  Some(6.7),
+)

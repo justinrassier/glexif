@@ -1,3 +1,4 @@
+import birdie
 import file_streams/file_stream
 import fswalk
 import gleam/bit_array
@@ -33,6 +34,7 @@ import glexif/exif_tags/y_cb_cr_positioning
 import glexif/internal/decoders/exif_tag as exif_tag_decoders
 import glexif/units/fraction.{type Fraction, Fraction}
 import glexif/units/gps_coordinates
+import pprint
 import shellout.{type Lookups}
 
 pub fn main() {
@@ -181,59 +183,40 @@ pub fn full_motorola_test() {
   ))
 }
 
-pub fn shellout_test() {
-  let from_library =
-    glexif.get_exif_data_for_file("test/fixtures/motorola.jpeg")
-  //
-  // Can be removed once I get all 60+ tags parsed from JSON
-  let simplified = exif_tag.to_simple(from_library)
-  let assert Ok(json_string) =
-    shellout.command(
-      run: "exiftool",
-      with: ["motorola.jpeg", "-j"],
-      in: "test/fixtures",
-      opt: [],
-    )
-  json.decode(
-    from: json_string,
-    using: list(exif_tag_decoders.exif_tag_decoder()),
-  )
-  |> should.be_ok
-  |> list.first
-  |> should.be_ok
-  |> should.equal(simplified)
-}
+pub fn auto_json_comparison_test() {
+  fswalk.builder()
+  |> fswalk.with_path("test/fixtures/pictures")
+  |> fswalk.walk
+  |> iterator.fold([], fn(acc, it) {
+    case it {
+      Ok(entry) if !entry.stat.is_directory -> [entry.filename, ..acc]
+      _ -> acc
+    }
+  })
+  |> iterator.from_list
+  |> iterator.each(fn(pic_path) {
+    let assert Ok(json_string) =
+      shellout.command(
+        run: "exiftool",
+        with: [pic_path, "-j"],
+        in: ".",
+        opt: [],
+      )
 
-pub fn fswalk_test() {
-  let pictures =
-    fswalk.builder()
-    |> fswalk.with_path("test/fixtures/pictures")
-    |> fswalk.walk
-    |> iterator.fold([], fn(acc, it) {
-      case it {
-        Ok(entry) if !entry.stat.is_directory -> [entry.filename, ..acc]
-        _ -> acc
-      }
-    })
-    |> iterator.from_list
-    |> iterator.each(fn(pic_path) {
-      let assert Ok(json_string) =
-        shellout.command(
-          run: "exiftool",
-          with: [pic_path, "-j"],
-          in: ".",
-          opt: [],
-        )
-
+    let library_parsed =
+      exif_tag.to_simple(glexif.get_exif_data_for_file(pic_path))
+    let json_parsed =
       json.decode(
         json_string,
         using: list(exif_tag_decoders.exif_tag_decoder()),
       )
-      |> should.be_ok
-      |> list.first
-      |> should.be_ok
-      |> should.equal(
-        exif_tag.to_simple(glexif.get_exif_data_for_file(pic_path)),
-      )
-    })
+
+    library_parsed |> pprint.format |> birdie.snap(title: pic_path)
+
+    json_parsed
+    |> should.be_ok
+    |> list.first
+    |> should.be_ok
+    |> should.equal(library_parsed)
+  })
 }
