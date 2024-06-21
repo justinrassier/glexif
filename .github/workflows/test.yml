@@ -6,6 +6,8 @@ on:
       - main
       - json-parsing-testing
   pull_request:
+    branches:
+      - main
 
 jobs:
   test:
