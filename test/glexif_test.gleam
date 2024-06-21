@@ -1,12 +1,15 @@
 import file_streams/file_stream
+import fswalk
 import gleam/bit_array
 import gleam/dict
 import gleam/dynamic.{list}
 import gleam/io
+import gleam/iterator
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
+import gleam/string
 import gleeunit
 import gleeunit/should
 import glexif
@@ -50,7 +53,7 @@ pub fn full_intel_test() {
     modify_date: Some("2010:01:01 14:20:19"),
     host_computer: None,
     y_cb_cr_positioning: Some(y_cb_cr_positioning.CoSited),
-    exposure_time: Some(Fraction(10, 300)),
+    exposure_time: Some(Fraction(1, 30)),
     f_number: Some(2.7),
     exposure_program: Some(exposure_program.ProgramAE),
     iso: Some(320),
@@ -61,10 +64,10 @@ pub fn full_intel_test() {
     offset_time_original: None,
     offset_time_digitized: None,
     components_configuration: Some([
-      components_configuration.NA,
-      components_configuration.Cr,
-      components_configuration.Cb,
       components_configuration.Y,
+      components_configuration.Cb,
+      components_configuration.Cr,
+      components_configuration.NA,
     ]),
     // shutter_speed_value: None,
     aperture_value: None,
@@ -199,4 +202,38 @@ pub fn shellout_test() {
   |> list.first
   |> should.be_ok
   |> should.equal(simplified)
+}
+
+pub fn fswalk_test() {
+  let pictures =
+    fswalk.builder()
+    |> fswalk.with_path("test/fixtures/pictures")
+    |> fswalk.walk
+    |> iterator.fold([], fn(acc, it) {
+      case it {
+        Ok(entry) if !entry.stat.is_directory -> [entry.filename, ..acc]
+        _ -> acc
+      }
+    })
+    |> iterator.from_list
+    |> iterator.each(fn(pic_path) {
+      let assert Ok(json_string) =
+        shellout.command(
+          run: "exiftool",
+          with: [pic_path, "-j"],
+          in: ".",
+          opt: [],
+        )
+
+      json.decode(
+        json_string,
+        using: list(exif_tag_decoders.exif_tag_decoder()),
+      )
+      |> should.be_ok
+      |> list.first
+      |> should.be_ok
+      |> should.equal(
+        exif_tag.to_simple(glexif.get_exif_data_for_file(pic_path)),
+      )
+    })
 }

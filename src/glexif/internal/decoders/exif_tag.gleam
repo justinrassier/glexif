@@ -54,7 +54,7 @@ pub fn exif_tag_decoder() {
     optional_field(named: "ExposureCompensation", of: decode_int_to_float),
     optional_field(named: "MeteringMode", of: decode_metering_mode),
     optional_field(named: "Flash", of: decode_flash),
-    optional_field(named: "ocalLength", of: decode_focal_length),
+    optional_field(named: "FocalLength", of: decode_focal_length),
   )
 }
 
@@ -75,6 +75,7 @@ pub fn decode_flash(
 ) -> Result(flash.Flash, List(DecodeError)) {
   case string(from_data) {
     Ok("Off, Did not fire") -> Ok(flash.OffDidNotFire)
+    Ok("Auto, Did not fire") -> Ok(flash.AutoDidNotFire)
     Ok(v) -> Error([dynamic.DecodeError("flash", v, [])])
     _ -> Error([])
   }

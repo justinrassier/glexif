@@ -578,6 +578,7 @@ pub fn raw_exif_entry_to_parsed_tag(
     ExposureTime -> {
       let exposure_time =
         extract_unsigned_rational_to_fraction(entry.data, tiff_header)
+        |> utils.simplify_fraction
       exif_tag.ExifTagRecord(..record, exposure_time: Some(exposure_time))
     }
 
@@ -659,7 +660,9 @@ pub fn raw_exif_entry_to_parsed_tag(
 
     ComponentsConfiguration -> {
       let components_configuration =
-        bit_array_to_decimal_list(entry.data)
+        entry.data
+        |> reverse_if_intel(tiff_header)
+        |> bit_array_to_decimal_list
         |> list.map(fn(v) {
           case v {
             0 -> components_configuration.NA
