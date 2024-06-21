@@ -68,7 +68,6 @@ pub fn decode_focal_length(
   |> result.map(float.parse)
   |> result.flatten
   |> result.map_error(fn(_) { [dynamic.DecodeError("focal lengh", "", [])] })
-  |> io.debug
 }
 
 pub fn decode_flash(

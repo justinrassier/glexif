@@ -759,7 +759,9 @@ pub fn raw_exif_entry_to_parsed_tag(
       let Fraction(numerator, denominator) =
         extract_unsigned_rational_to_fraction(entry.data, tiff_header)
 
-      let focal_length = int.to_float(numerator) /. int.to_float(denominator)
+      let focal_length =
+        int.to_float(numerator) /. int.to_float(denominator)
+        |> utils.round_to_n_decimals(1)
 
       exif_tag.ExifTagRecord(..record, focal_length: Some(focal_length))
     }

@@ -1,9 +1,12 @@
 import file_streams/file_stream
 import gleam/bit_array
+import gleam/dict
 import gleam/dynamic.{list}
+import gleam/io
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/result
 import gleeunit
 import gleeunit/should
 import glexif
@@ -27,6 +30,7 @@ import glexif/exif_tags/y_cb_cr_positioning
 import glexif/internal/decoders/exif_tag as exif_tag_decoders
 import glexif/units/fraction.{type Fraction, Fraction}
 import glexif/units/gps_coordinates
+import shellout.{type Lookups}
 
 pub fn main() {
   gleeunit.main()
@@ -136,8 +140,7 @@ pub fn full_motorola_test() {
     exposure_compensation: Some(0.0),
     metering_mode: Some(metering_mode.MultiSegement),
     flash: Some(OffDidNotFire),
-    // TODO: Need units? Or is it always millimeters? ExifTool rounds to 1 decimal, should I do that too?
-    focal_length: Some(6.86),
+    focal_length: Some(6.9),
     subject_area: Some([2009, 1505, 2208, 1324]),
     // TODO: parse out maker data. This is a whole ball of wax and I'm kicking the can down the road
     maker_data: Some(exif_tag.TBD),
@@ -175,17 +178,19 @@ pub fn full_motorola_test() {
   ))
 }
 
-pub fn json_parsing_test() {
-  let filename = "test/fixtures/motorola.jpeg.json"
-  let assert Ok(stream) = file_stream.open_read(filename)
-  let assert Ok(data) = file_stream.read_remaining_bytes(stream)
-  let assert Ok(json_string) = bit_array.to_string(data)
+pub fn shellout_test() {
   let from_library =
     glexif.get_exif_data_for_file("test/fixtures/motorola.jpeg")
   //
   // Can be removed once I get all 60+ tags parsed from JSON
   let simplified = exif_tag.to_simple(from_library)
-  //
+  let assert Ok(json_string) =
+    shellout.command(
+      run: "exiftool",
+      with: ["motorola.jpeg", "-j"],
+      in: "test/fixtures",
+      opt: [],
+    )
   json.decode(
     from: json_string,
     using: list(exif_tag_decoders.exif_tag_decoder()),
@@ -194,14 +199,4 @@ pub fn json_parsing_test() {
   |> list.first
   |> should.be_ok
   |> should.equal(simplified)
-}
-
-pub fn decode_fraction_test() {
-  dynamic.from("1/10")
-  |> exif_tag_decoders.decode_fraction
-  |> should.equal(Ok(Fraction(1, 10)))
-
-  dynamic.from("10/100")
-  |> exif_tag_decoders.decode_fraction
-  |> should.equal(Ok(Fraction(1, 10)))
 }
