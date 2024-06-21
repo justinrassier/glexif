@@ -1,7 +1,9 @@
 import gleam/bit_array
+import gleam/float
 import gleam/int
 import gleam/io
 import gleam/result
+import glexif/units/fraction.{type Fraction, Fraction}
 
 pub fn print_bit_array(arr: Result(BitArray, Nil)) -> Nil {
   io.debug(bit_array.inspect(result.unwrap(arr, <<>>)))
@@ -45,4 +47,22 @@ pub fn bit_array_reverse(b: BitArray) -> BitArray {
     <<a, b:bits>> -> bit_array.concat([bit_array_reverse(b), <<a>>])
     _ -> <<>>
   }
+}
+
+pub fn round_to_n_decimals(num: Float, decimals: Int) {
+  let assert Ok(factor) = int.power(10, int.to_float(decimals))
+  int.to_float(float.round(factor *. num)) /. factor
+}
+
+pub fn greatest_common_denominator(a: Int, b: Int) -> Int {
+  case a, b {
+    _, 0 -> a
+    _, _ -> greatest_common_denominator(b, a % b)
+  }
+}
+
+pub fn simplify_fraction(fraction: Fraction) -> Fraction {
+  let Fraction(numerator, denominator) = fraction
+  let gcd = greatest_common_denominator(numerator, denominator)
+  Fraction(numerator / gcd, denominator / gcd)
 }

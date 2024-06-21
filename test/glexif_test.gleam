@@ -1,5 +1,9 @@
-import gleam/io
-import gleam/option.{None, Some}
+import file_streams/file_stream
+import gleam/bit_array
+import gleam/dynamic.{list}
+import gleam/json
+import gleam/list
+import gleam/option.{type Option, None, Some}
 import gleeunit
 import gleeunit/should
 import glexif
@@ -20,7 +24,8 @@ import glexif/exif_tags/scene_type
 import glexif/exif_tags/sensing_method
 import glexif/exif_tags/white_balance
 import glexif/exif_tags/y_cb_cr_positioning
-import glexif/units/fraction.{Fraction}
+import glexif/internal/decoders/exif_tag as exif_tag_decoders
+import glexif/units/fraction.{type Fraction, Fraction}
 import glexif/units/gps_coordinates
 
 pub fn main() {
@@ -42,10 +47,10 @@ pub fn full_intel_test() {
     host_computer: None,
     y_cb_cr_positioning: Some(y_cb_cr_positioning.CoSited),
     exposure_time: Some(Fraction(10, 300)),
-    f_number: Some(Fraction(27, 10)),
+    f_number: Some(2.7),
     exposure_program: Some(exposure_program.ProgramAE),
     iso: Some(320),
-    exif_version: Some("1220"),
+    exif_version: Some("0221"),
     date_time_original: Some("2010:01:01 14:20:19"),
     create_date: Some("2010:01:01 14:20:19"),
     offset_time: None,
@@ -57,10 +62,10 @@ pub fn full_intel_test() {
       components_configuration.Cb,
       components_configuration.Y,
     ]),
-    shutter_speed_value: None,
-    aperature_value: None,
+    // shutter_speed_value: None,
+    aperture_value: None,
     brightness_value: None,
-    exposure_compensation: Some(Fraction(0, 10)),
+    exposure_compensation: Some(0.0),
     metering_mode: Some(metering_mode.MultiSegement),
     flash: Some(flash.AutoDidNotFire),
     focal_length: Some(4.7),
@@ -109,7 +114,7 @@ pub fn full_motorola_test() {
     host_computer: Some("iPhone 14 Pro"),
     y_cb_cr_positioning: Some(y_cb_cr_positioning.Centered),
     exposure_time: Some(Fraction(1, 179)),
-    f_number: Some(Fraction(89, 50)),
+    f_number: Some(1.8),
     exposure_program: Some(exposure_program.ProgramAE),
     iso: Some(64),
     exif_version: Some("0232"),
@@ -124,12 +129,11 @@ pub fn full_motorola_test() {
       components_configuration.Cr,
       components_configuration.NA,
     ]),
-    // TODO: convert this to seconds instead of the raw fraction
-    shutter_speed_value: Some(Fraction(124_929, 16_690)),
-    // TODO: convert this to the human readable value that it should be
-    aperature_value: Some(Fraction(163_775, 98_437)),
-    brightness_value: Some(5.389648033126294),
-    exposure_compensation: Some(Fraction(0, 1)),
+    // TODO: not sure what to do about the apex conversion not matching exiftool
+    // shutter_speed_value: Some(Fraction(124_929, 16_690)),
+    aperture_value: Some(1.8),
+    brightness_value: Some(5.389648033),
+    exposure_compensation: Some(0.0),
     metering_mode: Some(metering_mode.MultiSegement),
     flash: Some(OffDidNotFire),
     // TODO: Need units? Or is it always millimeters? ExifTool rounds to 1 decimal, should I do that too?
@@ -169,4 +173,35 @@ pub fn full_motorola_test() {
     gps_speed_ref: Some(gps_speed_ref.KilometersPerHour),
     gps_speed: Some(0.0),
   ))
+}
+
+pub fn json_parsing_test() {
+  let filename = "test/fixtures/motorola.jpeg.json"
+  let assert Ok(stream) = file_stream.open_read(filename)
+  let assert Ok(data) = file_stream.read_remaining_bytes(stream)
+  let assert Ok(json_string) = bit_array.to_string(data)
+  let from_library =
+    glexif.get_exif_data_for_file("test/fixtures/motorola.jpeg")
+  //
+  // Can be removed once I get all 60+ tags parsed from JSON
+  let simplified = exif_tag.to_simple(from_library)
+  //
+  json.decode(
+    from: json_string,
+    using: list(exif_tag_decoders.exif_tag_decoder()),
+  )
+  |> should.be_ok
+  |> list.first
+  |> should.be_ok
+  |> should.equal(simplified)
+}
+
+pub fn decode_fraction_test() {
+  dynamic.from("1/10")
+  |> exif_tag_decoders.decode_fraction
+  |> should.equal(Ok(Fraction(1, 10)))
+
+  dynamic.from("10/100")
+  |> exif_tag_decoders.decode_fraction
+  |> should.equal(Ok(Fraction(1, 10)))
 }

@@ -2,6 +2,7 @@ import file_streams/file_stream
 import file_streams/file_stream_error
 import gleam/bit_array
 import gleam/dict
+import gleam/float
 import gleam/int
 import gleam/io
 import gleam/list
@@ -581,9 +582,15 @@ pub fn raw_exif_entry_to_parsed_tag(
     }
 
     FNumber -> {
-      let f_number =
+      let Fraction(numerator, denominator) =
         extract_unsigned_rational_to_fraction(entry.data, tiff_header)
-      exif_tag.ExifTagRecord(..record, f_number: Some(f_number))
+      exif_tag.ExifTagRecord(
+        ..record,
+        f_number: Some(utils.round_to_n_decimals(
+          int.to_float(numerator) /. int.to_float(denominator),
+          1,
+        )),
+      )
     }
     ExposureProgram -> {
       let exposure_program = case extract_integer_data(entry) {
@@ -607,7 +614,10 @@ pub fn raw_exif_entry_to_parsed_tag(
     }
 
     ExifVersion -> {
-      let exif_version = extract_ascii_data(entry.data) |> Some
+      let exif_version =
+        reverse_if_intel(entry.data, tiff_header)
+        |> extract_ascii_data
+        |> Some
       exif_tag.ExifTagRecord(..record, exif_version: exif_version)
     }
 
@@ -668,18 +678,34 @@ pub fn raw_exif_entry_to_parsed_tag(
       )
     }
 
-    ShutterSpeedValue -> {
-      let shutter_speed_value = extract_signed_rational_to_fraction(entry.data)
-
-      exif_tag.ExifTagRecord(
-        ..record,
-        shutter_speed_value: Some(shutter_speed_value),
-      )
-    }
+    //TODO: Removing shutter speed value because exiftool looks
+    // to be extracting the "exposure time" even though the real underlying
+    // rational number. https://photo.stackexchange.com/questions/108817/shutter-speed-from-the-exif-shutterspeedvalue
+    // ShutterSpeedValue -> {
+    //   io.debug(bit_array.inspect(entry.data))
+    //   io.debug(entry)
+    //   let shutter_speed_value = extract_signed_rational_to_fraction(entry.data)
+    //
+    //   exif_tag.ExifTagRecord(
+    //     ..record,
+    //     shutter_speed_value: Some(shutter_speed_value),
+    //   )
+    // }
     ApertureValue -> {
-      let aperature_value = extract_signed_rational_to_fraction(entry.data)
+      // The actual aperture value of lens when the image was taken. To convert this value to ordinary F-number(F-stop), calculate this value's power of root 2 (=1.4142). For example, if value is '5', F-number is 1.4142^5 = F5.6.
+      //https://www.media.mit.edu/pia/Research/deepview/exif.html
+      let Fraction(numerator, denominator) =
+        extract_signed_rational_to_fraction(entry.data)
 
-      exif_tag.ExifTagRecord(..record, aperature_value: Some(aperature_value))
+      let aperture_decimal =
+        int.to_float(numerator) /. int.to_float(denominator)
+
+      let aperture_value =
+        float.power(1.4142, aperture_decimal)
+        |> result.unwrap(0.0)
+        |> utils.round_to_n_decimals(1)
+
+      exif_tag.ExifTagRecord(..record, aperture_value: Some(aperture_value))
     }
 
     BrightnessValue -> {
@@ -687,13 +713,18 @@ pub fn raw_exif_entry_to_parsed_tag(
         extract_unsigned_rational_to_fraction(entry.data, tiff_header)
       let brightness_value =
         int.to_float(numerator) /. int.to_float(denominator)
+        |> utils.round_to_n_decimals(9)
 
       exif_tag.ExifTagRecord(..record, brightness_value: Some(brightness_value))
     }
 
     ExposureCompensation -> {
-      let exposure_compensation =
+      let Fraction(numerator, denominator) =
         extract_unsigned_rational_to_fraction(entry.data, tiff_header)
+
+      let exposure_compensation =
+        int.to_float(numerator) /. int.to_float(denominator)
+
       exif_tag.ExifTagRecord(
         ..record,
         exposure_compensation: Some(exposure_compensation),
@@ -1127,12 +1158,12 @@ fn extract_signed_rational_to_fraction(data: BitArray) -> Fraction {
   // test data has this as positive values
   let numerator =
     data
-    |> bit_array.slice(0, 4)
+    |> bit_array.slice(1, 3)
     |> result.map(utils.bit_array_to_decimal)
     |> result.unwrap(0)
   let denominator =
     data
-    |> bit_array.slice(4, 4)
+    |> bit_array.slice(5, 3)
     |> result.map(utils.bit_array_to_decimal)
     |> result.unwrap(0)
 
