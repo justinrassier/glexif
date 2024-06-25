@@ -10,12 +10,19 @@ import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 import glexif/exif_tag
+import glexif/exif_tags/color_space
 import glexif/exif_tags/components_configuration.{type ComponentsConfiguration}
+import glexif/exif_tags/composite_image
+import glexif/exif_tags/exposure_mode
 import glexif/exif_tags/exposure_program
 import glexif/exif_tags/flash
 import glexif/exif_tags/metering_mode
 import glexif/exif_tags/orientation
 import glexif/exif_tags/resolution_unit
+import glexif/exif_tags/scene_capture_type
+import glexif/exif_tags/scene_type
+import glexif/exif_tags/sensing_method
+import glexif/exif_tags/white_balance
 import glexif/exif_tags/y_cb_cr_positioning
 import glexif/internal/utils
 import glexif/units/fraction.{type Fraction, Fraction}
@@ -55,7 +62,135 @@ pub fn exif_tag_decoder() {
     optional_field(named: "MeteringMode", of: decode_metering_mode),
     optional_field(named: "Flash", of: decode_flash),
     optional_field(named: "FocalLength", of: decode_focal_length),
+    optional_field(named: "SubjectArea", of: decode_subject_area),
+    optional_field(named: "SubSecTimeOriginal", of: int),
+    optional_field(named: "SubSecTimeDigitized", of: int),
+    optional_field(named: "FlashpixVersion", of: string),
+    optional_field(named: "ColorSpace", of: decode_color_space),
+    optional_field(named: "ExifImageWidth", of: int),
+    optional_field(named: "ExifImageHeight", of: int),
+    optional_field(named: "SensingMethod", of: decode_sensing_method),
+    optional_field(named: "SceneType", of: decode_scene_type),
+    optional_field(named: "ExposureMode", of: decode_exposure_mode),
+    optional_field(named: "WhiteBalance", of: decode_white_balance),
+    optional_field(
+      named: "FocalLengthIn35mmFormat",
+      of: decode_focal_length_35_mm_format,
+    ),
+    optional_field(named: "SceneCaptureType", of: decode_scene_capture_type),
+    optional_field(named: "LensMake", of: string),
+    optional_field(named: "LensModel", of: string),
+    optional_field(named: "CompositeImage", of: decode_composite_image),
+    optional_field(named: "GPSLatitudeRef", of: decode_gps_latitude_ref),
   )
+}
+
+pub fn decode_gps_latitude_ref(
+  from_data: Dynamic,
+) -> Result(String, List(DecodeError)) {
+  case string(from_data) {
+    Ok("North") -> Ok("N")
+    Ok("South") -> Ok("S")
+    Ok(v) -> Error([dynamic.DecodeError("GPS Latitude Ref", v, [])])
+    Error(e) -> Error(e)
+  }
+}
+
+pub fn decode_composite_image(
+  from_data: Dynamic,
+) -> Result(composite_image.CompositeImage, List(DecodeError)) {
+  case string(from_data) {
+    Ok("General Composite Image") -> Ok(composite_image.GeneralCompositeImage)
+    Ok(v) -> Error([dynamic.DecodeError("composite image", v, [])])
+    Error(e) -> Error(e)
+  }
+}
+
+pub fn decode_scene_capture_type(
+  from_data: Dynamic,
+) -> Result(scene_capture_type.SceneCaptureType, List(DecodeError)) {
+  case string(from_data) {
+    Ok("Standard") -> Ok(scene_capture_type.Standard)
+    Ok(v) -> Error([dynamic.DecodeError("scene capture type", v, [])])
+    Error(e) -> Error(e)
+  }
+}
+
+pub fn decode_white_balance(
+  from_data: Dynamic,
+) -> Result(white_balance.WhiteBalance, List(DecodeError)) {
+  case string(from_data) {
+    Ok("Auto") -> Ok(white_balance.Auto)
+    Ok(v) -> Error([dynamic.DecodeError("white balance", v, [])])
+    Error(e) -> Error(e)
+  }
+}
+
+pub fn decode_exposure_mode(
+  from_data: Dynamic,
+) -> Result(exposure_mode.ExposureMode, List(DecodeError)) {
+  case string(from_data) {
+    Ok("Auto") -> Ok(exposure_mode.Auto)
+    Ok(v) -> Error([dynamic.DecodeError("exposure mode", v, [])])
+    Error(e) -> Error(e)
+  }
+}
+
+pub fn decode_scene_type(
+  from_data: Dynamic,
+) -> Result(scene_type.SceneType, List(DecodeError)) {
+  case string(from_data) {
+    Ok("Directly photographed") -> Ok(scene_type.DirectlyPhotographed)
+    Ok(v) -> Error([dynamic.DecodeError("scene type", v, [])])
+    Error(e) -> Error(e)
+  }
+}
+
+pub fn decode_sensing_method(
+  from_data: Dynamic,
+) -> Result(sensing_method.SensingMethod, List(DecodeError)) {
+  case string(from_data) {
+    Ok("One-chip color area") -> Ok(sensing_method.OneChipColorArea)
+    Ok(v) -> Error([dynamic.DecodeError("sensing method", v, [])])
+    Error(e) -> Error(e)
+  }
+}
+
+pub fn decode_color_space(
+  from_data: Dynamic,
+) -> Result(color_space.ColorSpace, List(DecodeError)) {
+  case string(from_data) {
+    Ok("Uncalibrated") -> Ok(color_space.Uncalibrated)
+    Ok("sRGB") -> Ok(color_space.SRGB)
+    Ok(v) -> Error([dynamic.DecodeError("color space", v, [])])
+    Error(e) -> Error(e)
+  }
+}
+
+pub fn decode_subject_area(
+  from_data: Dynamic,
+) -> Result(List(Int), List(DecodeError)) {
+  string(from_data)
+  |> result.map(fn(v) { string.split(v, " ") })
+  |> result.map_error(fn(_) { [dynamic.DecodeError("subject area", _, [])] })
+  |> result.unwrap([])
+  |> list.map(int.parse)
+  |> list.map(result.unwrap(_, 0))
+  |> Ok
+}
+
+pub fn decode_focal_length_35_mm_format(
+  from_data: Dynamic,
+) -> Result(Int, List(DecodeError)) {
+  string(from_data)
+  |> result.map(fn(v) { string.split(v, " ") })
+  |> result.unwrap([])
+  |> list.first
+  |> result.map(int.parse)
+  |> result.flatten
+  |> result.map_error(fn(_) {
+    [dynamic.DecodeError("focal lengh in 35mm format", "", [])]
+  })
 }
 
 pub fn decode_focal_length(
@@ -77,7 +212,7 @@ pub fn decode_flash(
     Ok("Off, Did not fire") -> Ok(flash.OffDidNotFire)
     Ok("Auto, Did not fire") -> Ok(flash.AutoDidNotFire)
     Ok(v) -> Error([dynamic.DecodeError("flash", v, [])])
-    _ -> Error([])
+    Error(e) -> Error(e)
   }
 }
 
@@ -222,23 +357,23 @@ pub fn decode_exif_record(
     t26,
     t27,
     t28,
-    // t29,
-    // t30,
-    // t31,
-    // t32,
-    // t33,
-    // t34,
-    // t35,
-    // t36,
-    // t37,
-    // t38,
-    // t39,
-    // t40,
-    // t41,
-    // t42,
-    // t43,
-    // t44,
-    // t45,
+    t29,
+    t30,
+    t31,
+    t32,
+    t33,
+    t34,
+    t35,
+    t36,
+    t37,
+    t38,
+    t39,
+    t40,
+    t41,
+    t42,
+    t43,
+    t44,
+    t45,
     // t46,
     // t47,
     // t48,
@@ -287,23 +422,23 @@ pub fn decode_exif_record(
   t26: Decoder(t26),
   t27: Decoder(t27),
   t28: Decoder(t28),
-  // t29: Decoder(t29),
-  // t30: Decoder(t30),
-  // t31: Decoder(t31),
-  // t32: Decoder(t32),
-  // t33: Decoder(t33),
-  // t34: Decoder(t34),
-  // t35: Decoder(t35),
-  // t36: Decoder(t36),
-  // t37: Decoder(t37),
-  // t38: Decoder(t38),
-  // t39: Decoder(t39),
-  // t40: Decoder(t40),
-  // t41: Decoder(t41),
-  // t42: Decoder(t42),
-  // t43: Decoder(t43),
-  // t44: Decoder(t44),
-  // t45: Decoder(t45),
+  t29: Decoder(t29),
+  t30: Decoder(t30),
+  t31: Decoder(t31),
+  t32: Decoder(t32),
+  t33: Decoder(t33),
+  t34: Decoder(t34),
+  t35: Decoder(t35),
+  t36: Decoder(t36),
+  t37: Decoder(t37),
+  t38: Decoder(t38),
+  t39: Decoder(t39),
+  t40: Decoder(t40),
+  t41: Decoder(t41),
+  t42: Decoder(t42),
+  t43: Decoder(t43),
+  t44: Decoder(t44),
+  t45: Decoder(t45),
   // t46: Decoder(t46),
   // t47: Decoder(t47),
   // t48: Decoder(t48),
@@ -352,25 +487,25 @@ pub fn decode_exif_record(
       t25(x),
       t26(x),
       t27(x),
-      t28(x)
+      t28(x),
+      t29(x),
+      t30(x),
+      t31(x),
+      t32(x),
+      t33(x),
+      t34(x),
+      t35(x),
+      t36(x),
+      t37(x),
+      t38(x),
+      t39(x),
+      t40(x),
+      t41(x),
+      t42(x),
+      t43(x),
+      t44(x),
+      t45(x)
     {
-      // t29(x),
-      // t30(x),
-      // t31(x),
-      // t32(x),
-      // t33(x),
-      // t34(x),
-      // t35(x),
-      // t36(x),
-      // t37(x),
-      // t38(x),
-      // t39(x),
-      // t40(x),
-      // t41(x),
-      // t42(x),
-      // t43(x),
-      // t44(x),
-      // t45(x),
       // t46(x),
       // t47(x),
       // t48(x),
@@ -416,25 +551,25 @@ pub fn decode_exif_record(
         Ok(y),
         Ok(z),
         Ok(aa),
-        Ok(bb)
+        Ok(bb),
+        Ok(cc),
+        Ok(dd),
+        Ok(ee),
+        Ok(ff),
+        Ok(gg),
+        Ok(hh),
+        Ok(ii),
+        Ok(jj),
+        Ok(kk),
+        Ok(ll),
+        Ok(mm),
+        Ok(nn),
+        Ok(oo),
+        Ok(pp),
+        Ok(qq),
+        Ok(rr),
+        Ok(ss)
       ->
-        // Ok(cc),
-        // Ok(dd),
-        // Ok(ee),
-        // Ok(ff),
-        // Ok(gg),
-        // Ok(hh),
-        // Ok(ii),
-        // Ok(jj),
-        // Ok(kk),
-        // Ok(ll),
-        // Ok(mm),
-        // Ok(nn),
-        // Ok(oo),
-        // Ok(pp),
-        // Ok(qq),
-        // Ok(rr),
-        // Ok(ss),
         // Ok(tt),
         // Ok(uu),
         // Ok(vv),
@@ -482,24 +617,24 @@ pub fn decode_exif_record(
           z,
           aa,
           bb,
-          // cc,
-        // dd,
-        // ee,
-        // ff,
-        // gg,
-        // hh,
-        // ii,
-        // jj,
-        // kk,
-        // ll,
-        // mm,
-        // nn,
-        // oo,
-        // pp,
-        // qq,
-        // rr,
-        // ss,
-        // tt,
+          cc,
+          dd,
+          ee,
+          ff,
+          gg,
+          hh,
+          ii,
+          jj,
+          kk,
+          ll,
+          mm,
+          nn,
+          oo,
+          pp,
+          qq,
+          rr,
+          ss,
+          // tt,
         // uu,
         // vv,
         // ww,
@@ -545,25 +680,25 @@ pub fn decode_exif_record(
         y,
         z,
         aa,
-        bb
+        bb,
+        cc,
+        dd,
+        ee,
+        ff,
+        gg,
+        hh,
+        ii,
+        jj,
+        kk,
+        ll,
+        mm,
+        nn,
+        oo,
+        pp,
+        qq,
+        rr,
+        ss
       ->
-        // cc,
-        // dd,
-        // ee,
-        // ff,
-        // gg,
-        // hh,
-        // ii,
-        // jj,
-        // kk,
-        // ll,
-        // mm,
-        // nn,
-        // oo,
-        // pp,
-        // qq,
-        // rr,
-        // ss,
         // tt,
         // uu,
         // vv,
@@ -612,24 +747,24 @@ pub fn decode_exif_record(
             all_errors(z),
             all_errors(aa),
             all_errors(bb),
-            // all_errors(cc),
-          // all_errors(dd),
-          // all_errors(ee),
-          // all_errors(ff),
-          // all_errors(gg),
-          // all_errors(hh),
-          // all_errors(ii),
-          // all_errors(jj),
-          // all_errors(kk),
-          // all_errors(ll),
-          // all_errors(mm),
-          // all_errors(nn),
-          // all_errors(oo),
-          // all_errors(pp),
-          // all_errors(qq),
-          // all_errors(rr),
-          // all_errors(ss),
-          // all_errors(tt),
+            all_errors(cc),
+            all_errors(dd),
+            all_errors(ee),
+            all_errors(ff),
+            all_errors(gg),
+            all_errors(hh),
+            all_errors(ii),
+            all_errors(jj),
+            all_errors(kk),
+            all_errors(ll),
+            all_errors(mm),
+            all_errors(nn),
+            all_errors(oo),
+            all_errors(pp),
+            all_errors(qq),
+            all_errors(rr),
+            all_errors(ss),
+            // all_errors(tt),
           // all_errors(uu),
           // all_errors(vv),
           // all_errors(ww),

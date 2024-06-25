@@ -776,27 +776,37 @@ pub fn raw_exif_entry_to_parsed_tag(
       exif_tag.ExifTagRecord(..record, subject_area: Some(subject_area))
     }
 
-    MakerData ->
-      exif_tag.ExifTagRecord(..record, maker_data: Some(exif_tag.TBD))
-
+    // MakerData ->
+    //   exif_tag.ExifTagRecord(..record, maker_data: Some(exif_tag.TBD))
     SubSecTimeOriginal -> {
-      let sub_sec_time_original = extract_ascii_data(entry.data)
+      let sub_sec_time_original =
+        extract_ascii_data(entry.data)
+        |> int.parse
+        |> result.unwrap(-1)
+        |> Some
       exif_tag.ExifTagRecord(
         ..record,
-        sub_sec_time_original: Some(sub_sec_time_original),
+        sub_sec_time_original: sub_sec_time_original,
       )
     }
 
     SubSecTimeDigitized -> {
-      let sub_sec_time_digitized = extract_ascii_data(entry.data)
+      let sub_sec_time_digitized =
+        extract_ascii_data(entry.data)
+        |> int.parse
+        |> result.unwrap(-1)
+        |> Some
       exif_tag.ExifTagRecord(
         ..record,
-        sub_sec_time_digitized: Some(sub_sec_time_digitized),
+        sub_sec_time_digitized: sub_sec_time_digitized,
       )
     }
 
     FlashpixVersion -> {
-      let flash_pix_version = extract_ascii_data(entry.data)
+      let flash_pix_version =
+        entry.data
+        |> reverse_if_intel(tiff_header)
+        |> extract_ascii_data
       exif_tag.ExifTagRecord(
         ..record,
         flash_pix_version: Some(flash_pix_version),
@@ -901,11 +911,11 @@ pub fn raw_exif_entry_to_parsed_tag(
         scene_capture_type: Some(scene_capture_type),
       )
     }
-    LensInfo -> {
-      let fraction_list = bit_array_to_fraction_list(entry.data)
-
-      exif_tag.ExifTagRecord(..record, lens_info: Some(fraction_list))
-    }
+    // LensInfo -> {
+    //   let fraction_list = bit_array_to_fraction_list(entry.data)
+    //
+    //   exif_tag.ExifTagRecord(..record, lens_info: Some(fraction_list))
+    // }
     LensMake -> {
       let lens_make = extract_ascii_data(entry.data)
       exif_tag.ExifTagRecord(..record, lens_make: Some(lens_make))
