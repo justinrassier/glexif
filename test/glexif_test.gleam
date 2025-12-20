@@ -1,4 +1,3 @@
-import gleam/io
 import gleam/option.{None, Some}
 import gleeunit
 import gleeunit/should

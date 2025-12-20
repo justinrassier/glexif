@@ -1,4 +1,4 @@
-import gleam/option.{type Option, None, Some}
+import gleam/option.{type Option, None}
 import glexif/exif_tags/color_space.{type ColorSpace}
 import glexif/exif_tags/components_configuration.{type ComponentsConfiguration}
 import glexif/exif_tags/composite_image.{type CompositeImage}

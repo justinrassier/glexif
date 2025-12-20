@@ -3,7 +3,6 @@ import file_streams/file_stream_error
 import gleam/bit_array
 import gleam/dict
 import gleam/int
-import gleam/io
 import gleam/list
 import gleam/option.{Some}
 import gleam/result
@@ -30,9 +29,7 @@ import glexif/internal/orientation as internal_orientation
 
 import glexif/internal/utils
 import glexif/units/fraction.{type Fraction, Fraction}
-import glexif/units/gps_coordinates.{
-  type GPSCoordinates, GPSCoordinates, InvalidGPSCoordinates,
-}
+import glexif/units/gps_coordinates.{GPSCoordinates, InvalidGPSCoordinates}
 
 pub type ExifParseError {
   BadHeaders(message: String)
@@ -312,7 +309,7 @@ pub fn get_raw_entries(
       tiff_header,
     ))
     // need to reverse it one more time to get back the right order since
-    // the parse_data_or_offset also had to do its own reverse. 
+    // the parse_data_or_offset also had to do its own reverse.
     // Definitely should be a better way to do this, but it looks to work
     |> try_reverse_if_intel(tiff_header)
 
@@ -1002,8 +999,7 @@ pub fn raw_exif_entry_to_parsed_tag(
       exif_tag.ExifTagRecord(..record, gps_speed: Some(gps_speed))
     }
 
-    u -> {
-      // io.debug(u)
+    _ -> {
       record
     }
   }
@@ -1123,7 +1119,7 @@ fn extract_signed_rational_to_fraction(data: BitArray) -> Fraction {
     _ -> panic as "wut?"
   }
 
-  // TODO: For now just treat as unsigned rational since my 
+  // TODO: For now just treat as unsigned rational since my
   // test data has this as positive values
   let numerator =
     data
@@ -1139,7 +1135,7 @@ fn extract_signed_rational_to_fraction(data: BitArray) -> Fraction {
   Fraction(numerator, denominator)
 }
 
-type OffsetLocation {
+pub type OffsetLocation {
   IFD
   // regular
   GPS
@@ -1226,7 +1222,7 @@ fn parse_data_or_offset(
 
   case data_or_offset, dt {
     _, Unknown(_) -> Error(Nil)
-    d, _ as t -> {
+    d, t -> {
       let size = t.bytes * component_count
       let offset = utils.bit_array_to_decimal(data_or_offset)
       case t.bytes {

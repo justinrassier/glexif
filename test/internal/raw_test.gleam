@@ -2,11 +2,10 @@
 /// pieces split out
 /// Test the raw parsed entries that are a rough parsing of all the information in each entry
 /// these values will then be handed to be formatted for what a user actually would want. This step
-/// could be optimized I'm sure, but it's a good intermediate step as I am learning the spec and how to 
+/// could be optimized I'm sure, but it's a good intermediate step as I am learning the spec and how to
 /// interpret these things
 // import fixtures/test_segment
 // import gleam/bit_array
-// import gleam/io
 // import gleam/list
 // import gleam/result
 // import gleeunit/should
@@ -34,7 +33,7 @@
 //     raw_data: test_segment.test_jpeg_segment_raw_data,
 //   ))
 //
-//   // Full size of the segment - "size" (2 bytes) - the "Exif" header to get all 
+//   // Full size of the segment - "size" (2 bytes) - the "Exif" header to get all
 //   // the raw bytes used for reading entries with offsets
 //   bit_array.byte_size(segment.raw_data)
 //   |> should.equal(12_493 - 2 - bit_array.byte_size(segment.exif_header))

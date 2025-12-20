@@ -1,10 +1,9 @@
 import gleam/bit_array
 import gleam/int
-import gleam/io
 import gleam/result
 
 pub fn print_bit_array(arr: Result(BitArray, Nil)) -> Nil {
-  io.debug(bit_array.inspect(result.unwrap(arr, <<>>)))
+  echo bit_array.inspect(result.unwrap(arr, <<>>))
   Nil
 }
 
