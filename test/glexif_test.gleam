@@ -91,6 +91,9 @@ pub fn full_intel_test() {
     gps_speed_ref: None,
     gps_speed: None,
   ))
+
+  //
+  glexif.get_exif_data_for_file("test/fixtures/ricoh.jpg")
 }
 
 pub fn full_motorola_test() {
