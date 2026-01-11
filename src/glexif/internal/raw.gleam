@@ -168,7 +168,7 @@ pub fn read_until_marker(
 
 /// size is the two bytes after the exif marker
 pub fn read_exif_size(rs: file_stream.FileStream) -> Int {
-  case file_stream.read_int16_be(rs) {
+  case file_stream.read_uint16_be(rs) {
     Ok(val) -> {
       val
     }
