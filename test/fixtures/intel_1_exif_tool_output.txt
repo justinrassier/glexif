@@ -1,0 +1,172 @@
+ExifTool Version Number         : 13.45
+File Name                       : ricoh.jpg
+Directory                       : test/fixtures
+File Size                       : 11 MB
+File Modification Date/Time     : 2026:01:11 18:46:17+01:00
+File Access Date/Time           : 2026:01:11 18:55:59+01:00
+File Inode Change Date/Time     : 2026:01:11 18:54:49+01:00
+File Permissions                : -rw-------
+File Type                       : JPEG
+File Type Extension             : jpg
+MIME Type                       : image/jpeg
+Exif Byte Order                 : Little-endian (Intel, II)
+Make                            : RICOH IMAGING COMPANY, LTD.
+Camera Model Name               : RICOH GR IIIx
+Orientation                     : Rotate 270 CW
+X Resolution                    : 300
+Y Resolution                    : 300
+Resolution Unit                 : inches
+Software                        : RICOH GR IIIx Ver. 1.50
+Modify Date                     : 2025:08:06 14:40:23
+Y Cb Cr Positioning             : Co-sited
+Copyright                       : Christian Ost
+Exposure Time                   : 1/160
+F Number                        : 3.5
+Exposure Program                : Program AE
+Sensitivity Type                : Standard Output Sensitivity
+Standard Output Sensitivity     : 200
+Exif Version                    : 0230
+Date/Time Original              : 2025:08:06 14:40:23
+Create Date                     : 2025:08:06 14:40:23
+Components Configuration        : Y, Cb, Cr, -
+Flash                           : Off, Did not fire
+Focal Length                    : 26.0 mm
+Pentax Version                  : 15.1.0.0
+Pentax Model Type               : 0
+Pentax Model ID                 : GR IIIx
+Date                            : 2025:08:06
+Time                            : 14:40:23
+Quality                         : Best
+Flash Mode                      : Off, Did not fire; Internal
+Focus Mode                      : Select
+ISO                             : 200
+Exposure Compensation           : 0
+Metering Mode                   : Multi-segment
+Auto Bracketing                 : 0 EV, No Extended Bracket
+White Balance                   : Auto
+DSP Firmware Version            : 1.50.11.16
+Effective LV                    : 9.9
+Image Editing                   : None
+Picture Mode                    : Program; 1/3 EV steps
+Drive Mode                      : Single-frame; No Timer; Shutter Button; Single Exposure
+Data Scaling                    : 8158
+Lens Type                       : 26.1mm F2.8
+Extender Status                 : Not attached
+Sensitivity Adjust              : 0
+Image Edit Count                : 0
+Camera Temperature              : 24 C
+AE Lock                         : On
+Noise Reduction                 : Off
+Flash Exposure Comp             : 0; 0
+Image Tone                      : Negative Film
+Shake Reduction                 : On (AA simulation off)
+Shutter Count                   : 1445
+Raw Development Process         : 19 (GR III)
+White Balance Auto Adjustment   : Off
+Tungsten AWB                    : Strong Correction
+Dynamic Range Expansion         : On; Auto; 0; 0
+Contrast Highlight/Shadow Adj   : On
+High ISO Noise Reduction        : Off; Inactive
+Shadow Correction               : Normal
+ISO Auto Min Speed              : Shutter Speed Control; 1/40
+Distortion Correction           : Off
+Chromatic Aberration Correction : Off
+Peripheral Illumination Corr    : On
+Diffraction Correction          : Off
+Aspect Ratio                    : 3:2
+Shutter Type                    : Normal
+Neutral Density Filter          : Off (Auto)
+Black Point                     : 64 64 64 64
+White Point                     : 23712 8192 8192 13856
+Manufacture Date                : 2024:11:03
+Production Code                 : 3.9
+Internal Serial Number          : 2277275
+Power Source                    : Camera Battery
+Body Battery State              : Almost Empty
+Color Matrix A2                 : 5857 2334 0 0 8192 0 0 335 7856
+Color Matrix B2                 : 13952 -4416 -1344 -1472 13792 -4128 128 -2816 10880
+Kelvin WB Daylight              : 5205 0 2.63671875 1.677978515625
+Kelvin WB 01                    : 2500 0 1.4608154296875 2.9039306640625
+Kelvin WB 02                    : 2630 0 1.5428466796875 2.808349609375
+Kelvin WB 03                    : 2780 0 1.6336669921875 2.6871337890625
+Kelvin WB 04                    : 2940 0 1.7266845703125 2.560791015625
+Kelvin WB 05                    : 3130 0 1.8328857421875 2.424072265625
+Kelvin WB 06                    : 3330 0 1.9388427734375 2.298095703125
+Kelvin WB 07                    : 3570 0 2.057861328125 2.1702880859375
+Kelvin WB 08                    : 3850 0 2.18505859375 2.0467529296875
+Kelvin WB 09                    : 4170 0 2.3150634765625 1.93212890625
+Kelvin WB 10                    : 4550 0 2.4493408203125 1.82177734375
+Kelvin WB 11                    : 5000 0 2.5841064453125 1.717529296875
+Kelvin WB 12                    : 5560 0 2.7216796875 1.614990234375
+Kelvin WB 13                    : 6250 0 2.856201171875 1.517822265625
+Kelvin WB 14                    : 7140 0 2.98974609375 1.4249267578125
+Kelvin WB 15                    : 8330 0 3.1224365234375 1.3394775390625
+Kelvin WB 16                    : 10000 0 3.256103515625 1.265625
+WB Shift AB                     : -6
+WB Shift GM                     : 0
+Serial Number                   : 0112205
+Source Directory Index          : 0
+Source File Index               : 0
+Level Orientation               : n/a
+Composition Adjust              : Off
+Roll Angle                      : -0.5
+Pitch Angle                     : 0
+Composition Adjust X            : -66
+Composition Adjust Y            : 0
+Composition Adjust Rotation     : 32
+Face Image Size                 : 6000 4000
+CAF Area                        : 666 500 4668 3000
+Faces Detected A                : 0
+Faces Detected B                : 0
+AF Mode                         : Contrast Detect
+AF Selection Mode               : Contrast-detect Select
+Max Num AF Points               : 1
+Num AF Points                   : 1
+AF Frame Size                   : 720x480
+AF Areas                        : 400,225(in-focus)
+AF Area Size                    : 64x52
+Flashpix Version                : 0100
+Color Space                     : sRGB
+Exif Image Width                : 6000
+Exif Image Height               : 4000
+Interoperability Index          : R98 - DCF basic file (sRGB)
+Interoperability Version        : 0100
+Sensing Method                  : One-chip color area
+File Source                     : Digital Camera
+Scene Type                      : Directly photographed
+Custom Rendered                 : Custom
+Exposure Mode                   : Auto
+Focal Length In 35mm Format     : 40 mm
+Scene Capture Type              : Standard
+Contrast                        : High
+Saturation                      : High
+Sharpness                       : Hard
+Subject Distance Range          : Macro
+GPS Version ID                  : 2.3.0.0
+PrintIM Version                 : 0300
+Compression                     : JPEG (old-style)
+Thumbnail Offset                : 32066
+Thumbnail Length                : 7205
+Preview Image Size              : 720x480
+Preview Image Length            : 57624
+Preview Image Start             : 39362
+Preview Image Borders           : 0 0 0 0
+Image Width                     : 6000
+Image Height                    : 4000
+Encoding Process                : Baseline DCT, Huffman coding
+Bits Per Sample                 : 8
+Color Components                : 3
+Y Cb Cr Sub Sampling            : YCbCr4:2:2 (2 1)
+Aperture                        : 3.5
+Image Size                      : 6000x4000
+Lens ID                         : 26.1mm F2.8
+Megapixels                      : 24.0
+Preview Image                   : (Binary data 57624 bytes, use -b option to extract)
+Scale Factor To 35 mm Equivalent: 1.5
+Shutter Speed                   : 1/160
+Thumbnail Image                 : (Binary data 7205 bytes, use -b option to extract)
+Circle Of Confusion             : 0.020 mm
+Field Of View                   : 48.5 deg
+Focal Length                    : 26.0 mm (35 mm equivalent: 40.0 mm)
+Hyperfocal Distance             : 9.89 m
+Light Value                     : 9.9
