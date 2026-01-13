@@ -2,8 +2,8 @@ import file_streams/file_stream
 import file_streams/file_stream_error
 import gleam/bit_array
 import gleam/dict
+import gleam/float
 import gleam/int
-import gleam/io
 import gleam/list
 import gleam/option.{Some}
 import gleam/result
@@ -30,9 +30,7 @@ import glexif/internal/orientation as internal_orientation
 
 import glexif/internal/utils
 import glexif/units/fraction.{type Fraction, Fraction}
-import glexif/units/gps_coordinates.{
-  type GPSCoordinates, GPSCoordinates, InvalidGPSCoordinates,
-}
+import glexif/units/gps_coordinates.{GPSCoordinates, InvalidGPSCoordinates}
 
 pub type ExifParseError {
   BadHeaders(message: String)
@@ -171,7 +169,7 @@ pub fn read_until_marker(
 
 /// size is the two bytes after the exif marker
 pub fn read_exif_size(rs: file_stream.FileStream) -> Int {
-  case file_stream.read_int16_be(rs) {
+  case file_stream.read_uint16_be(rs) {
     Ok(val) -> {
       val
     }
@@ -267,7 +265,7 @@ pub fn parse_exif_data_as_record(
 /// all the entries in the raw data and try to extract all the necessary raw data
 /// pieces that are later used to format into a consumer friendly type
 ///TODO: try to clean this up, it's pretty gnarly
-pub fn get_raw_entries(
+fn get_raw_entries(
   segment_bytes: BitArray,
   start: Int,
   total_segment_count: Int,
@@ -513,8 +511,7 @@ pub fn raw_exif_entry_to_parsed_tag(
     }
     Orientation -> {
       let orientation =
-        entry
-        |> extract_integer_data
+        extract_integer_data(entry, tiff_header)
         |> dict.get(internal_orientation.exif_orientation_map(), _)
         |> result.unwrap(orientation.InvalidOrientation)
         |> Some
@@ -524,15 +521,15 @@ pub fn raw_exif_entry_to_parsed_tag(
     XResolution ->
       exif_tag.ExifTagRecord(
         ..record,
-        x_resolution: Some(extract_integer_data(entry)),
+        x_resolution: Some(extract_integer_data(entry, tiff_header)),
       )
     YResolution ->
       exif_tag.ExifTagRecord(
         ..record,
-        y_resolution: Some(extract_integer_data(entry)),
+        y_resolution: Some(extract_integer_data(entry, tiff_header)),
       )
     ResolutionUnit -> {
-      let unit = case extract_integer_data(entry) {
+      let unit = case extract_integer_data(entry, tiff_header) {
         1 -> resolution_unit.NoResolutionTagUnit
         2 -> resolution_unit.Inches
         3 -> resolution_unit.Centimeters
@@ -567,7 +564,7 @@ pub fn raw_exif_entry_to_parsed_tag(
     }
 
     YCbCrPositioning -> {
-      let positioning = case extract_integer_data(entry) {
+      let positioning = case extract_integer_data(entry, tiff_header) {
         1 -> y_cb_cr_positioning.Centered
         2 -> y_cb_cr_positioning.CoSited
         _ -> y_cb_cr_positioning.InvalidYCbCrPositioning
@@ -577,16 +574,23 @@ pub fn raw_exif_entry_to_parsed_tag(
     ExposureTime -> {
       let exposure_time =
         extract_unsigned_rational_to_fraction(entry.data, tiff_header)
+        |> utils.simplify_fraction
       exif_tag.ExifTagRecord(..record, exposure_time: Some(exposure_time))
     }
 
     FNumber -> {
-      let f_number =
+      let Fraction(numerator, denominator) =
         extract_unsigned_rational_to_fraction(entry.data, tiff_header)
-      exif_tag.ExifTagRecord(..record, f_number: Some(f_number))
+      exif_tag.ExifTagRecord(
+        ..record,
+        f_number: Some(utils.round_to_n_decimals(
+          int.to_float(numerator) /. int.to_float(denominator),
+          1,
+        )),
+      )
     }
     ExposureProgram -> {
-      let exposure_program = case extract_integer_data(entry) {
+      let exposure_program = case extract_integer_data(entry, tiff_header) {
         0 -> exposure_program.NotDefined
         1 -> exposure_program.Manual
         2 -> exposure_program.ProgramAE
@@ -602,12 +606,15 @@ pub fn raw_exif_entry_to_parsed_tag(
     }
 
     ISO -> {
-      let iso = extract_integer_data(entry)
+      let iso = extract_integer_data(entry, tiff_header)
       exif_tag.ExifTagRecord(..record, iso: Some(iso))
     }
 
     ExifVersion -> {
-      let exif_version = extract_ascii_data(entry.data) |> Some
+      let exif_version =
+        reverse_if_intel(entry.data, tiff_header)
+        |> extract_ascii_data
+        |> Some
       exif_tag.ExifTagRecord(..record, exif_version: exif_version)
     }
 
@@ -649,7 +656,9 @@ pub fn raw_exif_entry_to_parsed_tag(
 
     ComponentsConfiguration -> {
       let components_configuration =
-        bit_array_to_decimal_list(entry.data)
+        entry.data
+        |> reverse_if_intel(tiff_header)
+        |> bit_array_to_decimal_list
         |> list.map(fn(v) {
           case v {
             0 -> components_configuration.NA
@@ -668,18 +677,34 @@ pub fn raw_exif_entry_to_parsed_tag(
       )
     }
 
-    ShutterSpeedValue -> {
-      let shutter_speed_value = extract_signed_rational_to_fraction(entry.data)
-
-      exif_tag.ExifTagRecord(
-        ..record,
-        shutter_speed_value: Some(shutter_speed_value),
-      )
-    }
+    //TODO: Removing shutter speed value because exiftool looks
+    // to be extracting the "exposure time" even though the real underlying
+    // rational number. https://photo.stackexchange.com/questions/108817/shutter-speed-from-the-exif-shutterspeedvalue
+    // ShutterSpeedValue -> {
+    //   io.debug(bit_array.inspect(entry.data))
+    //   io.debug(entry)
+    //   let shutter_speed_value = extract_signed_rational_to_fraction(entry.data)
+    //
+    //   exif_tag.ExifTagRecord(
+    //     ..record,
+    //     shutter_speed_value: Some(shutter_speed_value),
+    //   )
+    // }
     ApertureValue -> {
-      let aperature_value = extract_signed_rational_to_fraction(entry.data)
+      // The actual aperture value of lens when the image was taken. To convert this value to ordinary F-number(F-stop), calculate this value's power of root 2 (=1.4142). For example, if value is '5', F-number is 1.4142^5 = F5.6.
+      //https://www.media.mit.edu/pia/Research/deepview/exif.html
+      let Fraction(numerator, denominator) =
+        extract_signed_rational_to_fraction(entry.data)
 
-      exif_tag.ExifTagRecord(..record, aperature_value: Some(aperature_value))
+      let aperture_decimal =
+        int.to_float(numerator) /. int.to_float(denominator)
+
+      let aperture_value =
+        float.power(1.4142, aperture_decimal)
+        |> result.unwrap(0.0)
+        |> utils.round_to_n_decimals(1)
+
+      exif_tag.ExifTagRecord(..record, aperture_value: Some(aperture_value))
     }
 
     BrightnessValue -> {
@@ -687,13 +712,18 @@ pub fn raw_exif_entry_to_parsed_tag(
         extract_unsigned_rational_to_fraction(entry.data, tiff_header)
       let brightness_value =
         int.to_float(numerator) /. int.to_float(denominator)
+        |> utils.round_to_n_decimals(9)
 
       exif_tag.ExifTagRecord(..record, brightness_value: Some(brightness_value))
     }
 
     ExposureCompensation -> {
-      let exposure_compensation =
+      let Fraction(numerator, denominator) =
         extract_unsigned_rational_to_fraction(entry.data, tiff_header)
+
+      let exposure_compensation =
+        int.to_float(numerator) /. int.to_float(denominator)
+
       exif_tag.ExifTagRecord(
         ..record,
         exposure_compensation: Some(exposure_compensation),
@@ -701,7 +731,7 @@ pub fn raw_exif_entry_to_parsed_tag(
     }
     //
     MeteringMode -> {
-      let metering_mode = case extract_integer_data(entry) {
+      let metering_mode = case extract_integer_data(entry, tiff_header) {
         0 -> metering_mode.UnknownMeteringMode
         1 -> metering_mode.Average
         2 -> metering_mode.CenterWeightedAverage
@@ -728,7 +758,9 @@ pub fn raw_exif_entry_to_parsed_tag(
       let Fraction(numerator, denominator) =
         extract_unsigned_rational_to_fraction(entry.data, tiff_header)
 
-      let focal_length = int.to_float(numerator) /. int.to_float(denominator)
+      let focal_length =
+        int.to_float(numerator) /. int.to_float(denominator)
+        |> utils.round_to_n_decimals(1)
 
       exif_tag.ExifTagRecord(..record, focal_length: Some(focal_length))
     }
@@ -740,27 +772,37 @@ pub fn raw_exif_entry_to_parsed_tag(
       exif_tag.ExifTagRecord(..record, subject_area: Some(subject_area))
     }
 
-    MakerData ->
-      exif_tag.ExifTagRecord(..record, maker_data: Some(exif_tag.TBD))
-
+    // MakerData ->
+    //   exif_tag.ExifTagRecord(..record, maker_data: Some(exif_tag.TBD))
     SubSecTimeOriginal -> {
-      let sub_sec_time_original = extract_ascii_data(entry.data)
+      let sub_sec_time_original =
+        extract_ascii_data(entry.data)
+        |> int.parse
+        |> result.unwrap(-1)
+        |> Some
       exif_tag.ExifTagRecord(
         ..record,
-        sub_sec_time_original: Some(sub_sec_time_original),
+        sub_sec_time_original: sub_sec_time_original,
       )
     }
 
     SubSecTimeDigitized -> {
-      let sub_sec_time_digitized = extract_ascii_data(entry.data)
+      let sub_sec_time_digitized =
+        extract_ascii_data(entry.data)
+        |> int.parse
+        |> result.unwrap(-1)
+        |> Some
       exif_tag.ExifTagRecord(
         ..record,
-        sub_sec_time_digitized: Some(sub_sec_time_digitized),
+        sub_sec_time_digitized: sub_sec_time_digitized,
       )
     }
 
     FlashpixVersion -> {
-      let flash_pix_version = extract_ascii_data(entry.data)
+      let flash_pix_version =
+        entry.data
+        |> reverse_if_intel(tiff_header)
+        |> extract_ascii_data
       exif_tag.ExifTagRecord(
         ..record,
         flash_pix_version: Some(flash_pix_version),
@@ -780,24 +822,20 @@ pub fn raw_exif_entry_to_parsed_tag(
 
     ExifImageWidth -> {
       let exif_image_width =
-        entry
-        |> extract_integer_data
+        extract_integer_data(entry, tiff_header)
         |> Some
       exif_tag.ExifTagRecord(..record, exif_image_width: exif_image_width)
     }
 
     ExifImageHeight -> {
       let exif_image_height =
-        entry
-        |> extract_integer_data
+        extract_integer_data(entry, tiff_header)
         |> Some
       exif_tag.ExifTagRecord(..record, exif_image_height: exif_image_height)
     }
 
     SensingMethod -> {
-      let int_value =
-        entry
-        |> extract_integer_data
+      let int_value = extract_integer_data(entry, tiff_header)
 
       let sensing_method = case int_value {
         1 -> sensing_method.SensingMethodNotDefined
@@ -819,9 +857,7 @@ pub fn raw_exif_entry_to_parsed_tag(
       )
     }
     ExposureMode -> {
-      let int_value =
-        entry
-        |> extract_integer_data
+      let int_value = extract_integer_data(entry, tiff_header)
       let exposure_mode = case int_value {
         0 -> exposure_mode.Auto
         1 -> exposure_mode.Manual
@@ -831,9 +867,7 @@ pub fn raw_exif_entry_to_parsed_tag(
       exif_tag.ExifTagRecord(..record, exposure_mode: Some(exposure_mode))
     }
     WhiteBalance -> {
-      let int_value =
-        entry
-        |> extract_integer_data
+      let int_value = extract_integer_data(entry, tiff_header)
       let white_balance = case int_value {
         0 -> white_balance.Auto
         1 -> white_balance.Manual
@@ -843,15 +877,12 @@ pub fn raw_exif_entry_to_parsed_tag(
     }
     FocalLengthIn35mmFormat -> {
       let int_value =
-        entry
-        |> extract_integer_data
+        extract_integer_data(entry, tiff_header)
         |> Some
       exif_tag.ExifTagRecord(..record, focal_length_in_35_mm_format: int_value)
     }
     SceneCaptureType -> {
-      let int_value =
-        entry
-        |> extract_integer_data
+      let int_value = extract_integer_data(entry, tiff_header)
       let scene_capture_type = case int_value {
         0 -> scene_capture_type.Standard
         1 -> scene_capture_type.Landscape
@@ -865,11 +896,11 @@ pub fn raw_exif_entry_to_parsed_tag(
         scene_capture_type: Some(scene_capture_type),
       )
     }
-    LensInfo -> {
-      let fraction_list = bit_array_to_fraction_list(entry.data)
-
-      exif_tag.ExifTagRecord(..record, lens_info: Some(fraction_list))
-    }
+    // LensInfo -> {
+    //   let fraction_list = bit_array_to_fraction_list(entry.data)
+    //
+    //   exif_tag.ExifTagRecord(..record, lens_info: Some(fraction_list))
+    // }
     LensMake -> {
       let lens_make = extract_ascii_data(entry.data)
       exif_tag.ExifTagRecord(..record, lens_make: Some(lens_make))
@@ -879,7 +910,7 @@ pub fn raw_exif_entry_to_parsed_tag(
       exif_tag.ExifTagRecord(..record, lens_model: Some(lens_model))
     }
     CompositeImage -> {
-      let int_value = extract_integer_data(entry)
+      let int_value = extract_integer_data(entry, tiff_header)
       let composite_image = case int_value {
         0 -> composite_image.Unknown
         1 -> composite_image.NotACompositeImage
@@ -1002,8 +1033,7 @@ pub fn raw_exif_entry_to_parsed_tag(
       exif_tag.ExifTagRecord(..record, gps_speed: Some(gps_speed))
     }
 
-    u -> {
-      // io.debug(u)
+    _ -> {
       record
     }
   }
@@ -1063,12 +1093,16 @@ fn extract_ascii_data(data: BitArray) -> String {
   |> utils.trim_zero_bits
   |> bit_array.to_string
   |> result.unwrap("[[ERROR]]")
+  |> string.trim
 }
 
 /// For an unsigned short of length n, turn it into a list of ints
 /// Take the bit array types that need to be converted to some sort
 /// of decimal and convert them
-fn extract_integer_data(exif_entry: RawExifEntry) -> Int {
+fn extract_integer_data(
+  exif_entry: RawExifEntry,
+  tiff_header: TiffHeader,
+) -> Int {
   case exif_entry.data_type {
     UnsignedShort(size) | UnsignedLong(size) ->
       bit_array.slice(exif_entry.data, 0, size * exif_entry.component_count)
@@ -1078,11 +1112,13 @@ fn extract_integer_data(exif_entry: RawExifEntry) -> Int {
       let numerator =
         exif_entry.data
         |> bit_array.slice(0, 4)
+        |> try_reverse_if_intel(tiff_header)
         |> result.map(utils.bit_array_to_decimal)
         |> result.unwrap(0)
       let denominator =
         exif_entry.data
         |> bit_array.slice(4, 4)
+        |> try_reverse_if_intel(tiff_header)
         |> result.map(utils.bit_array_to_decimal)
         |> result.unwrap(0)
 
@@ -1127,12 +1163,12 @@ fn extract_signed_rational_to_fraction(data: BitArray) -> Fraction {
   // test data has this as positive values
   let numerator =
     data
-    |> bit_array.slice(0, 4)
+    |> bit_array.slice(1, 3)
     |> result.map(utils.bit_array_to_decimal)
     |> result.unwrap(0)
   let denominator =
     data
-    |> bit_array.slice(4, 4)
+    |> bit_array.slice(5, 3)
     |> result.map(utils.bit_array_to_decimal)
     |> result.unwrap(0)
 
@@ -1226,7 +1262,7 @@ fn parse_data_or_offset(
 
   case data_or_offset, dt {
     _, Unknown(_) -> Error(Nil)
-    d, _ as t -> {
+    d, t -> {
       let size = t.bytes * component_count
       let offset = utils.bit_array_to_decimal(data_or_offset)
       case t.bytes {
