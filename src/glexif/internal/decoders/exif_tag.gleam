@@ -34,7 +34,11 @@ pub fn exif_tag_decoder() -> Decoder(exif_tag.ExifTagRecordSimple) {
     None,
     decode.optional(decode_trimmed_string()),
   )
-  use make <- decode.optional_field("Make", None, decode.optional(decode_trimmed_string()))
+  use make <- decode.optional_field(
+    "Make",
+    None,
+    decode.optional(decode_trimmed_string()),
+  )
   use model <- decode.optional_field(
     "Model",
     None,
@@ -314,7 +318,8 @@ fn decode_composite_image() -> Decoder(composite_image.CompositeImage) {
     case s {
       "General Composite Image" ->
         decode.success(composite_image.GeneralCompositeImage)
-      _ -> decode.failure(composite_image.GeneralCompositeImage, "CompositeImage")
+      _ ->
+        decode.failure(composite_image.GeneralCompositeImage, "CompositeImage")
     }
   })
 }
@@ -474,10 +479,9 @@ fn decode_fraction() -> Decoder(Fraction) {
       Ok(#(num_str, denom_str)) -> {
         case int.parse(num_str), int.parse(denom_str) {
           Ok(numerator), Ok(denominator) ->
-            decode.success(utils.simplify_fraction(Fraction(
-              numerator,
-              denominator,
-            )))
+            decode.success(
+              utils.simplify_fraction(Fraction(numerator, denominator)),
+            )
           _, _ -> decode.failure(Fraction(0, 1), "Fraction")
         }
       }
@@ -496,9 +500,7 @@ fn decode_exposure_program() -> Decoder(exposure_program.ExposureProgram) {
   })
 }
 
-fn decode_y_cb_cr_positioning() -> Decoder(
-  y_cb_cr_positioning.YCbCrPositioning,
-) {
+fn decode_y_cb_cr_positioning() -> Decoder(y_cb_cr_positioning.YCbCrPositioning) {
   decode.string
   |> decode.then(fn(s) {
     case s {

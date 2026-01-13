@@ -199,7 +199,12 @@ pub fn auto_json_comparison_test() {
   // Process each picture
   list.each(picture_paths, fn(pic_path) {
     let assert Ok(json_string) =
-      shellout.command(run: "exiftool", with: [pic_path, "-j"], in: ".", opt: [])
+      shellout.command(
+        run: "exiftool",
+        with: [pic_path, "-j"],
+        in: ".",
+        opt: [],
+      )
 
     let library_parsed =
       exif_tag.to_simple(glexif.get_exif_data_for_file(pic_path))
