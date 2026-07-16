@@ -78,3 +78,8 @@ gleam format --check src test
 Further API documentation is available at <https://hexdocs.pm/glexif>.
 Release and migration notes are available in the
 [changelog](https://hexdocs.pm/glexif/changelog.html).
+
+## Note about AI
+The first releases of this library (<0.1.0) was created without any AI. It was a fun project to stretch my skills out of the regular web development world I know into something different. But I am not expert in the world of photography and bit parsing. So some of the first rounds of data were partially incorrect and a lot of it was incomplete. But for version 0.1.0 I needed something slightly more filled out to work with a different side-project. So this is a warning that 0.1.0 indeed leveraged AI just to get it to a better spot for my needs.
+
+I haven't followed the Gleam Community's feelings on AI, and I have plenty of mixed feelings myself. So I wanted to be at least transparent about the project so you can make your own mind on using this as a dependency or not.
