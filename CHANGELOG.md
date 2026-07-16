@@ -111,3 +111,7 @@ nonstandard APP1 payloads remain unsupported.
 
 - Added the GitHub repository URL to the published package metadata.
 - Added this changelog to the generated HexDocs pages.
+- Moved `gleam_json` to development dependencies because it is used only by
+  the ExifTool test oracle. Consumers now require only `gleam_stdlib` and
+  `file_streams`.
+- Updated CI to Gleam 1.17.0.

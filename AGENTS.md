@@ -7,7 +7,7 @@
 - `src/glexif/exif_tag.gleam` is the public data contract. Tag-specific enums live under `src/glexif/exif_tags/`; exact-value wrappers live under `src/glexif/units/`.
 - `ExifTagRecordSimple` and `to_simple/1` are a temporary parity-test projection. They omit most GPS fields. A field added only to `ExifTagRecord` is not covered by the ExifTool record comparison.
 - Maker notes, shutter-speed value, lens info, and some other tags remain intentionally unparsed/commented out. Do not imply support from a tag's presence in `RawExifTag` alone.
-- CI pins OTP 27.0 and Gleam 1.14.0 even if the local Gleam is newer; avoid language features unavailable in Gleam 1.14.
+- CI pins OTP 27.0 and Gleam 1.17.0 even if the local Gleam is newer; avoid language features unavailable in Gleam 1.17.
 
 ## EXIF Parsing Rules
 
