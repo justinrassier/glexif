@@ -1,8 +1,10 @@
 import birdie
+import gleam/dict
 import gleam/dynamic/decode
+import gleam/int
 import gleam/json
 import gleam/list
-import gleam/option.{None, Some}
+import gleam/option.{type Option, None, Some}
 import gleam/string
 import gleeunit
 import gleeunit/should
@@ -25,7 +27,7 @@ import glexif/exif_tags/sensing_method
 import glexif/exif_tags/white_balance
 import glexif/exif_tags/y_cb_cr_positioning
 import glexif/internal/decoders/exif_tag as exif_tag_decoders
-import glexif/units/fraction.{Fraction}
+import glexif/units/fraction.{type Fraction, Fraction}
 import glexif/units/gps_coordinates
 import pprint
 import shellout
@@ -37,13 +39,14 @@ pub fn main() {
 
 pub fn full_intel_test() {
   glexif.get_exif_data_for_file("test/fixtures/intel.jpeg")
+  |> should.be_ok
   |> should.equal(exif_tag.ExifTagRecord(
     image_description: Some(""),
     make: Some("SONY"),
     model: Some("DSC-W350"),
     orientation: Some(orientation.Horizontal),
-    x_resolution: Some(72),
-    y_resolution: Some(72),
+    x_resolution: Some(72.0),
+    y_resolution: Some(72.0),
     resolution_unit: Some(resolution_unit.Inches),
     software: None,
     modify_date: Some("2010:01:01 14:20:19"),
@@ -104,20 +107,21 @@ pub fn full_intel_test() {
 
 pub fn full_motorola_test() {
   glexif.get_exif_data_for_file("test/fixtures/motorola.jpeg")
+  |> should.be_ok
   |> should.equal(exif_tag.ExifTagRecord(
     image_description: None,
     make: Some("Apple"),
     model: Some("iPhone 14 Pro"),
     orientation: Some(orientation.Rotate90CW),
-    x_resolution: Some(72),
-    y_resolution: Some(72),
+    x_resolution: Some(72.0),
+    y_resolution: Some(72.0),
     resolution_unit: Some(resolution_unit.Inches),
     software: Some("17.2.1"),
     modify_date: Some("2024:02:18 17:34:57"),
     host_computer: Some("iPhone 14 Pro"),
     y_cb_cr_positioning: Some(y_cb_cr_positioning.Centered),
     exposure_time: Some(Fraction(1, 179)),
-    f_number: Some(1.8),
+    f_number: Some(1.78),
     exposure_program: Some(exposure_program.ProgramAE),
     iso: Some(64),
     exif_version: Some("0232"),
@@ -134,17 +138,17 @@ pub fn full_motorola_test() {
     ]),
     // TODO: not sure what to do about the apex conversion not matching exiftool
     // shutter_speed_value: Some(Fraction(124_929, 16_690)),
-    aperture_value: Some(1.8),
-    brightness_value: Some(5.389648033),
+    aperture_value: Some(1.78000000011049),
+    brightness_value: Some(5.389648033126294),
     exposure_compensation: Some(0.0),
     metering_mode: Some(metering_mode.MultiSegement),
     flash: Some(OffDidNotFire),
-    focal_length: Some(6.9),
+    focal_length: Some(6.86),
     subject_area: Some([2009, 1505, 2208, 1324]),
     // TODO: parse out maker data. This is a whole ball of wax and I'm kicking the can down the road
     // maker_data: Some(exif_tag.TBD),
-    sub_sec_time_original: Some(289),
-    sub_sec_time_digitized: Some(289),
+    sub_sec_time_original: Some("289"),
+    sub_sec_time_digitized: Some("289"),
     flash_pix_version: Some("0100"),
     color_space: Some(color_space.Uncalibrated),
     exif_image_width: Some(4032),
@@ -190,9 +194,7 @@ pub fn auto_json_comparison_test() {
     files
     |> list.filter(fn(file) {
       let lower = string.lowercase(file)
-      string.ends_with(lower, ".jpeg")
-      || string.ends_with(lower, ".jpg")
-      || string.ends_with(lower, ".png")
+      string.ends_with(lower, ".jpeg") || string.ends_with(lower, ".jpg")
     })
     |> list.map(fn(file) { pictures_dir <> "/" <> file })
 
@@ -201,13 +203,22 @@ pub fn auto_json_comparison_test() {
     let assert Ok(json_string) =
       shellout.command(
         run: "exiftool",
-        with: [pic_path, "-j"],
+        with: [
+          pic_path,
+          "-j",
+          "-n",
+          "-api",
+          "StructFormat=JSONQ",
+          "-EXIF:all",
+        ],
         in: ".",
         opt: [],
       )
 
     let library_parsed =
-      exif_tag.to_simple(glexif.get_exif_data_for_file(pic_path))
+      glexif.get_exif_data_for_file(pic_path)
+      |> should.be_ok
+      |> exif_tag.to_simple
 
     let json_parsed =
       json.parse(json_string, decode.list(exif_tag_decoders.exif_tag_decoder()))
@@ -220,6 +231,215 @@ pub fn auto_json_comparison_test() {
     |> should.be_ok
     |> list.first
     |> should.be_ok
-    |> should.equal(library_parsed)
+    |> assert_exiftool_matches(library_parsed, pic_path)
   })
+}
+
+/// Runs the ExifTool parity check against local photos when present. This
+/// directory is gitignored, so CI skips this test when it has no private files.
+pub fn private_auto_json_comparison_test() {
+  let pictures_dir = "test/private-fixtures"
+
+  case simplifile.read_directory(pictures_dir) {
+    Error(_) -> Nil
+    Ok(files) -> {
+      let picture_paths =
+        files
+        |> list.filter(fn(file) {
+          let lower = string.lowercase(file)
+          string.ends_with(lower, ".jpeg") || string.ends_with(lower, ".jpg")
+        })
+        |> list.map(fn(file) { pictures_dir <> "/" <> file })
+
+      case picture_paths {
+        [] -> Nil
+        _ -> compare_private_fixtures(picture_paths)
+      }
+    }
+  }
+}
+
+fn compare_private_fixtures(picture_paths: List(String)) -> Nil {
+  let assert Ok(json_string) =
+    shellout.command(
+      run: "exiftool",
+      with: list.append(
+        ["-q", "-q", "-j", "-n", "-api", "StructFormat=JSONQ", "-EXIF:all"],
+        picture_paths,
+      ),
+      in: ".",
+      opt: [],
+    )
+  let assert Ok(validation_json) =
+    shellout.command(
+      run: "exiftool",
+      with: list.append(
+        ["-q", "-q", "-j", "-validate", "-warning", "-error"],
+        picture_paths,
+      ),
+      in: ".",
+      opt: [],
+    )
+
+  let exiftool_parsed =
+    json.parse(json_string, decode.list(exif_tag_decoders.exif_tag_decoder()))
+    |> should.be_ok
+  let exiftool_fields =
+    json.parse(
+      json_string,
+      decode.list(decode.dict(decode.string, decode.dynamic)),
+    )
+    |> should.be_ok
+  let validations =
+    json.parse(validation_json, decode.list(exiftool_validation_decoder()))
+    |> should.be_ok
+  let assert Ok(paths_and_records) =
+    list.strict_zip(picture_paths, exiftool_parsed)
+  let assert Ok(records_and_fields) =
+    list.strict_zip(paths_and_records, exiftool_fields)
+  let assert Ok(records) = list.strict_zip(records_and_fields, validations)
+
+  list.each(records, fn(record) {
+    let #(#(#(pic_path, exiftool_record), fields), is_valid) = record
+    let library_result = glexif.get_exif_data_for_file(pic_path)
+
+    case dict.size(fields) > 1, is_valid, library_result {
+      False, _, Error(glexif.ExifMarkerNotFound) -> Nil
+      False, False, Error(_) -> Nil
+      False, True, Error(error) -> {
+        let message =
+          "Expected no EXIF for "
+          <> pic_path
+          <> ", got: "
+          <> glexif.error_to_string(error)
+
+        panic as message
+      }
+      False, _, Ok(_) -> {
+        let message = "Expected no EXIF for " <> pic_path
+        panic as message
+      }
+      True, True, Ok(record) ->
+        assert_exiftool_matches(
+          exiftool_record,
+          exif_tag.to_simple(record),
+          pic_path,
+        )
+      True, True, Error(error) -> {
+        let message =
+          "Could not parse valid EXIF for "
+          <> pic_path
+          <> ": "
+          <> glexif.error_to_string(error)
+
+        panic as message
+      }
+      // For malformed private files this sweep verifies only that the safe API
+      // returns normally; deterministic malformed fixtures assert exact errors.
+      True, False, _ -> Nil
+    }
+  })
+}
+
+fn exiftool_validation_decoder() {
+  use validation <- decode.optional_field("Validate", "", decode.string)
+  decode.success(validation == "OK")
+}
+
+fn assert_exiftool_matches(
+  exiftool: exif_tag.ExifTagRecordSimple,
+  glexif: exif_tag.ExifTagRecordSimple,
+  path: String,
+) -> Nil {
+  case records_match(exiftool, glexif) {
+    True -> Nil
+    False ->
+      panic as string.concat([
+          "ExifTool mismatch for ",
+          path,
+          "\n",
+          string.inspect(exiftool),
+          "\nshould equal\n",
+          string.inspect(glexif),
+        ])
+  }
+}
+
+fn records_match(
+  exiftool: exif_tag.ExifTagRecordSimple,
+  glexif: exif_tag.ExifTagRecordSimple,
+) -> Bool {
+  optional_float_matches(exiftool.x_resolution, glexif.x_resolution)
+  && optional_float_matches(exiftool.y_resolution, glexif.y_resolution)
+  && optional_fraction_matches(exiftool.exposure_time, glexif.exposure_time)
+  && optional_float_matches(exiftool.f_number, glexif.f_number)
+  && optional_float_matches(exiftool.aperture_value, glexif.aperture_value)
+  && optional_float_matches(exiftool.brightness_value, glexif.brightness_value)
+  && optional_float_matches(
+    exiftool.exposure_compensation,
+    glexif.exposure_compensation,
+  )
+  && optional_float_matches(exiftool.focal_length, glexif.focal_length)
+  && without_decimal_rationals(exiftool) == without_decimal_rationals(glexif)
+}
+
+fn without_decimal_rationals(
+  record: exif_tag.ExifTagRecordSimple,
+) -> exif_tag.ExifTagRecordSimple {
+  exif_tag.ExifTagRecordSimple(
+    ..record,
+    x_resolution: None,
+    y_resolution: None,
+    exposure_time: None,
+    f_number: None,
+    aperture_value: None,
+    brightness_value: None,
+    exposure_compensation: None,
+    focal_length: None,
+  )
+}
+
+fn optional_fraction_matches(
+  first: Option(Fraction),
+  second: Option(Fraction),
+) -> Bool {
+  case first, second {
+    Some(Fraction(first_numerator, first_denominator)),
+      Some(Fraction(second_numerator, second_denominator))
+    ->
+      floats_match(
+        int.to_float(first_numerator) /. int.to_float(first_denominator),
+        int.to_float(second_numerator) /. int.to_float(second_denominator),
+      )
+    None, None -> True
+    _, _ -> False
+  }
+}
+
+fn optional_float_matches(first: Option(Float), second: Option(Float)) -> Bool {
+  case first, second {
+    Some(first), Some(second) -> floats_match(first, second)
+    None, None -> True
+    _, _ -> False
+  }
+}
+
+fn floats_match(first: Float, second: Float) -> Bool {
+  let difference = absolute_float(first -. second)
+  let magnitude = float_max(absolute_float(first), absolute_float(second))
+  difference <=. 0.00000000001 +. magnitude *. 0.000000001
+}
+
+fn absolute_float(value: Float) -> Float {
+  case value <. 0.0 {
+    True -> 0.0 -. value
+    False -> value
+  }
+}
+
+fn float_max(first: Float, second: Float) -> Float {
+  case first >. second {
+    True -> first
+    False -> second
+  }
 }

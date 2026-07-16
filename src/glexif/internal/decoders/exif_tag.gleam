@@ -28,6 +28,7 @@ fn decode_trimmed_string() -> Decoder(String) {
   |> decode.map(string.trim)
 }
 
+/// Decodes JSON produced by `exiftool -j -n -api StructFormat=JSONQ -EXIF:all`.
 pub fn exif_tag_decoder() -> Decoder(exif_tag.ExifTagRecordSimple) {
   use image_description <- decode.optional_field(
     "ImageDescription",
@@ -52,12 +53,12 @@ pub fn exif_tag_decoder() -> Decoder(exif_tag.ExifTagRecordSimple) {
   use x_resolution <- decode.optional_field(
     "XResolution",
     None,
-    decode.optional(decode.int),
+    decode.optional(decode_numeric_float()),
   )
   use y_resolution <- decode.optional_field(
     "YResolution",
     None,
-    decode.optional(decode.int),
+    decode.optional(decode_numeric_float()),
   )
   use resolution_unit <- decode.optional_field(
     "ResolutionUnit",
@@ -92,14 +93,18 @@ pub fn exif_tag_decoder() -> Decoder(exif_tag.ExifTagRecordSimple) {
   use f_number <- decode.optional_field(
     "FNumber",
     None,
-    decode.optional(decode.float),
+    decode.optional(decode_numeric_float()),
   )
   use exposure_program <- decode.optional_field(
     "ExposureProgram",
     None,
     decode.optional(decode_exposure_program()),
   )
-  use iso <- decode.optional_field("ISO", None, decode.optional(decode.int))
+  use iso <- decode.optional_field(
+    "ISO",
+    None,
+    decode.optional(decode_numeric_int()),
+  )
   use exif_version <- decode.optional_field(
     "ExifVersion",
     None,
@@ -138,17 +143,17 @@ pub fn exif_tag_decoder() -> Decoder(exif_tag.ExifTagRecordSimple) {
   use aperture_value <- decode.optional_field(
     "ApertureValue",
     None,
-    decode.optional(decode.float),
+    decode.optional(decode_numeric_float()),
   )
   use brightness_value <- decode.optional_field(
     "BrightnessValue",
     None,
-    decode.optional(decode.float),
+    decode.optional(decode_numeric_float()),
   )
   use exposure_compensation <- decode.optional_field(
     "ExposureCompensation",
     None,
-    decode.optional(decode_int_to_float()),
+    decode.optional(decode_numeric_float()),
   )
   use metering_mode <- decode.optional_field(
     "MeteringMode",
@@ -173,12 +178,12 @@ pub fn exif_tag_decoder() -> Decoder(exif_tag.ExifTagRecordSimple) {
   use sub_sec_time_original <- decode.optional_field(
     "SubSecTimeOriginal",
     None,
-    decode.optional(decode.int),
+    decode.optional(decode_trimmed_string()),
   )
   use sub_sec_time_digitized <- decode.optional_field(
     "SubSecTimeDigitized",
     None,
-    decode.optional(decode.int),
+    decode.optional(decode_trimmed_string()),
   )
   use flash_pix_version <- decode.optional_field(
     "FlashpixVersion",
@@ -193,12 +198,12 @@ pub fn exif_tag_decoder() -> Decoder(exif_tag.ExifTagRecordSimple) {
   use exif_image_width <- decode.optional_field(
     "ExifImageWidth",
     None,
-    decode.optional(decode.int),
+    decode.optional(decode_numeric_int()),
   )
   use exif_image_height <- decode.optional_field(
     "ExifImageHeight",
     None,
-    decode.optional(decode.int),
+    decode.optional(decode_numeric_int()),
   )
   use sensing_method <- decode.optional_field(
     "SensingMethod",
@@ -301,238 +306,286 @@ pub fn exif_tag_decoder() -> Decoder(exif_tag.ExifTagRecordSimple) {
 }
 
 fn decode_gps_latitude_ref() -> Decoder(String) {
-  decode.string
-  |> decode.then(fn(s) {
-    let trimmed = string.trim(s)
-    case trimmed {
-      "North" -> decode.success("N")
-      "South" -> decode.success("S")
-      _ -> decode.failure("N", "GPS Latitude Ref")
-    }
-  })
+  decode_trimmed_string()
 }
 
 fn decode_composite_image() -> Decoder(composite_image.CompositeImage) {
-  decode.string
-  |> decode.then(fn(s) {
-    case s {
-      "General Composite Image" ->
-        decode.success(composite_image.GeneralCompositeImage)
-      _ ->
-        decode.failure(composite_image.GeneralCompositeImage, "CompositeImage")
+  decode_trimmed_string()
+  |> decode.map(fn(value) {
+    case value {
+      "0" -> composite_image.Unknown
+      "1" -> composite_image.NotACompositeImage
+      "2" -> composite_image.GeneralCompositeImage
+      "3" -> composite_image.CompositeImageCapturedWhileShooting
+      _ -> composite_image.InvalidCompositeImage
     }
   })
 }
 
 fn decode_scene_capture_type() -> Decoder(scene_capture_type.SceneCaptureType) {
-  decode.string
-  |> decode.then(fn(s) {
-    case s {
-      "Standard" -> decode.success(scene_capture_type.Standard)
-      _ -> decode.failure(scene_capture_type.Standard, "SceneCaptureType")
+  decode_trimmed_string()
+  |> decode.map(fn(value) {
+    case value {
+      "0" -> scene_capture_type.Standard
+      "1" -> scene_capture_type.Landscape
+      "2" -> scene_capture_type.Portrait
+      "3" -> scene_capture_type.Night
+      "4" -> scene_capture_type.Other
+      _ -> scene_capture_type.InvalidSceneCaptureType
     }
   })
 }
 
 fn decode_white_balance() -> Decoder(white_balance.WhiteBalance) {
-  decode.string
-  |> decode.then(fn(s) {
-    case s {
-      "Auto" -> decode.success(white_balance.Auto)
-      _ -> decode.failure(white_balance.Auto, "WhiteBalance")
+  decode_trimmed_string()
+  |> decode.map(fn(value) {
+    case value {
+      "0" -> white_balance.Auto
+      "1" -> white_balance.Manual
+      _ -> white_balance.InvalidWhiteBalance
     }
   })
 }
 
 fn decode_exposure_mode() -> Decoder(exposure_mode.ExposureMode) {
-  decode.string
-  |> decode.then(fn(s) {
-    case s {
-      "Auto" -> decode.success(exposure_mode.Auto)
-      _ -> decode.failure(exposure_mode.Auto, "ExposureMode")
+  decode_trimmed_string()
+  |> decode.map(fn(value) {
+    case value {
+      "0" -> exposure_mode.Auto
+      "1" -> exposure_mode.Manual
+      "2" -> exposure_mode.AutoBracket
+      _ -> exposure_mode.InvalidExposureMode
     }
   })
 }
 
 fn decode_scene_type() -> Decoder(scene_type.SceneType) {
-  decode.string
+  decode_trimmed_string()
   |> decode.then(fn(s) {
     case s {
-      "Directly photographed" -> decode.success(scene_type.DirectlyPhotographed)
+      "1" -> decode.success(scene_type.DirectlyPhotographed)
       _ -> decode.failure(scene_type.DirectlyPhotographed, "SceneType")
     }
   })
 }
 
 fn decode_sensing_method() -> Decoder(sensing_method.SensingMethod) {
-  decode.string
-  |> decode.then(fn(s) {
-    case s {
-      "One-chip color area" -> decode.success(sensing_method.OneChipColorArea)
-      _ -> decode.failure(sensing_method.OneChipColorArea, "SensingMethod")
+  decode_trimmed_string()
+  |> decode.map(fn(value) {
+    case value {
+      "1" -> sensing_method.SensingMethodNotDefined
+      "2" -> sensing_method.OneChipColorArea
+      "3" -> sensing_method.TwoChipColorArea
+      "4" -> sensing_method.ThreeChipColorArea
+      "5" -> sensing_method.ColorSequentialArea
+      "7" -> sensing_method.Trilinear
+      "8" -> sensing_method.ColorSequentialLinear
+      _ -> sensing_method.InvalidSensingMethod
     }
   })
 }
 
 fn decode_color_space() -> Decoder(color_space.ColorSpace) {
-  decode.string
-  |> decode.then(fn(s) {
-    case s {
-      "Uncalibrated" -> decode.success(color_space.Uncalibrated)
-      "sRGB" -> decode.success(color_space.SRGB)
-      _ -> decode.failure(color_space.SRGB, "ColorSpace")
+  decode_trimmed_string()
+  |> decode.map(fn(value) {
+    case value {
+      "1" -> color_space.SRGB
+      "2" -> color_space.AdobeRGB
+      "65533" -> color_space.WideGamutRGB
+      "65534" -> color_space.ICCProfile
+      "65535" -> color_space.Uncalibrated
+      _ -> color_space.InvalidColorSpace
     }
   })
 }
 
 fn decode_subject_area() -> Decoder(List(Int)) {
-  decode.string
-  |> decode.then(fn(s) {
-    let ints =
-      s
-      |> string.split(" ")
-      |> list.map(int.parse)
-      |> list.map(result.unwrap(_, 0))
-    decode.success(ints)
-  })
+  decode_int_list()
 }
 
 fn decode_focal_length_35_mm_format() -> Decoder(Int) {
-  decode.string
-  |> decode.then(fn(s) {
-    let result =
-      s
-      |> string.split(" ")
-      |> list.first
-      |> result.try(int.parse)
-      |> result.unwrap(0)
-    decode.success(result)
-  })
+  decode_numeric_int()
 }
 
 fn decode_focal_length() -> Decoder(Float) {
-  decode.string
-  |> decode.then(fn(s) {
-    let result =
-      s
-      |> string.split(" ")
-      |> list.first
-      |> result.try(float.parse)
-      |> result.unwrap(0.0)
-    decode.success(result)
-  })
+  decode_numeric_float()
 }
 
 fn decode_flash() -> Decoder(flash.Flash) {
-  decode.string
-  |> decode.then(fn(s) {
-    case s {
-      "Off, Did not fire" -> decode.success(flash.OffDidNotFire)
-      "Auto, Did not fire" -> decode.success(flash.AutoDidNotFire)
-      _ -> decode.failure(flash.OffDidNotFire, "Flash")
+  decode_trimmed_string()
+  |> decode.map(fn(value) {
+    case value {
+      "0" -> flash.NoFlash
+      "1" -> flash.Fired
+      "5" -> flash.FiredReturnNotDetected
+      "7" -> flash.FiredReturnDetected
+      "8" -> flash.OnDidNotFire
+      "9" -> flash.OnFired
+      "13" -> flash.OnReturnNotDetected
+      "15" -> flash.OnReturnDetected
+      "16" -> flash.OffDidNotFire
+      "20" -> flash.OffDidNotFireReturnNotDetected
+      "24" -> flash.AutoDidNotFire
+      "25" -> flash.AutoFired
+      "29" -> flash.AutoFiredReturnNotDetected
+      "31" -> flash.AutoFiredReturnDetected
+      "32" -> flash.NoFlashFunction
+      "48" -> flash.OffNoFlashFunction
+      "65" -> flash.FiredRedEyeReduction
+      "69" -> flash.FiredRedEyeReductionReturnNotDetected
+      "71" -> flash.FiredRedEyeReductionReturnDetected
+      "73" -> flash.OnRedEyeReduction
+      "77" -> flash.OnRedEyeReductionReturnNotDetected
+      "79" -> flash.OnRedEyeReductionReturnDetected
+      "80" -> flash.OffRedEyeReduction
+      "88" -> flash.AutoDidNotFireRedEyeReduction
+      "89" -> flash.AutoFiredRedEyeReduction
+      "93" -> flash.AutoFiredRedEyeReductionReturnNotDetected
+      "95" -> flash.AutoFiredRedEyeReductionReturnDetected
+      _ -> flash.InvalidFlash
     }
   })
 }
 
 fn decode_metering_mode() -> Decoder(metering_mode.MeteringMode) {
-  decode.string
-  |> decode.then(fn(s) {
-    case s {
-      "Multi-segment" -> decode.success(metering_mode.MultiSegement)
-      _ -> decode.failure(metering_mode.MultiSegement, "MeteringMode")
+  decode_trimmed_string()
+  |> decode.map(fn(value) {
+    case value {
+      "0" -> metering_mode.UnknownMeteringMode
+      "1" -> metering_mode.Average
+      "2" -> metering_mode.CenterWeightedAverage
+      "3" -> metering_mode.Spot
+      "4" -> metering_mode.MultiSpot
+      "5" -> metering_mode.MultiSegement
+      "6" -> metering_mode.Partial
+      "255" -> metering_mode.Other
+      _ -> metering_mode.InvalidMeteringMode
     }
   })
 }
 
-fn decode_int_to_float() -> Decoder(Float) {
-  decode.int
-  |> decode.map(int.to_float)
+fn decode_numeric_float() -> Decoder(Float) {
+  decode_trimmed_string()
+  |> decode.then(fn(value) {
+    case float.parse(value) {
+      Ok(number) -> decode.success(number)
+      Error(_) ->
+        case int.parse(value) {
+          Ok(number) -> decode.success(int.to_float(number))
+          Error(_) -> decode.failure(0.0, "Float")
+        }
+    }
+  })
+}
+
+fn decode_numeric_int() -> Decoder(Int) {
+  decode_trimmed_string()
+  |> decode.then(fn(value) {
+    case int.parse(value) {
+      Ok(number) -> decode.success(number)
+      Error(_) -> decode.failure(0, "Int")
+    }
+  })
 }
 
 fn decode_components_configuration() -> Decoder(List(ComponentsConfiguration)) {
-  decode.string
-  |> decode.then(fn(s) {
-    let components =
-      s
-      |> string.split(",")
-      |> list.map(string.trim)
-      |> list.map(fn(v) {
-        case v {
-          "Y" -> components_configuration.Y
-          "Cb" -> components_configuration.Cb
-          "Cr" -> components_configuration.Cr
-          "R" -> components_configuration.R
-          "G" -> components_configuration.G
-          "B" -> components_configuration.B
-          "-" -> components_configuration.NA
-          _ -> components_configuration.InvalidComponentsConfiguration
-        }
-      })
-    decode.success(components)
+  decode_trimmed_string()
+  |> decode.map(fn(value) {
+    value
+    |> string.split(" ")
+    |> list.map(fn(component) {
+      case component {
+        "0" -> components_configuration.NA
+        "1" -> components_configuration.Y
+        "2" -> components_configuration.Cb
+        "3" -> components_configuration.Cr
+        "4" -> components_configuration.R
+        "5" -> components_configuration.G
+        "6" -> components_configuration.B
+        _ -> components_configuration.InvalidComponentsConfiguration
+      }
+    })
   })
 }
 
 fn decode_fraction() -> Decoder(Fraction) {
-  decode.string
-  |> decode.then(fn(s) {
-    case string.split_once(s, "/") {
-      Ok(#(num_str, denom_str)) -> {
-        case int.parse(num_str), int.parse(denom_str) {
-          Ok(numerator), Ok(denominator) ->
-            decode.success(
-              utils.simplify_fraction(Fraction(numerator, denominator)),
-            )
-          _, _ -> decode.failure(Fraction(0, 1), "Fraction")
-        }
-      }
-      Error(_) -> decode.failure(Fraction(0, 1), "Fraction")
+  decode_numeric_float()
+  |> decode.map(fn(value) {
+    Fraction(float.round(value *. 1_000_000_000_000.0), 1_000_000_000_000)
+    |> utils.simplify_fraction
+  })
+}
+
+fn decode_int_list() -> Decoder(List(Int)) {
+  decode_trimmed_string()
+  |> decode.then(fn(value) {
+    let values =
+      value
+      |> string.split(" ")
+      |> list.map(int.parse)
+
+    case list.all(values, result.is_ok) {
+      True -> decode.success(list.map(values, result.unwrap(_, 0)))
+      False -> decode.failure([], "List(Int)")
     }
   })
 }
 
 fn decode_exposure_program() -> Decoder(exposure_program.ExposureProgram) {
-  decode.string
-  |> decode.then(fn(s) {
-    case s {
-      "Program AE" -> decode.success(exposure_program.ProgramAE)
-      _ -> decode.failure(exposure_program.ProgramAE, "ExposureProgram")
+  decode_trimmed_string()
+  |> decode.map(fn(value) {
+    case value {
+      "0" -> exposure_program.NotDefined
+      "1" -> exposure_program.Manual
+      "2" -> exposure_program.ProgramAE
+      "3" -> exposure_program.AperturePriorityAE
+      "4" -> exposure_program.ShutterSpeedPriorityAE
+      "5" -> exposure_program.Creative
+      "6" -> exposure_program.Action
+      "7" -> exposure_program.Portrait
+      "8" -> exposure_program.Landscape
+      "9" -> exposure_program.Bulb
+      _ -> exposure_program.InvalidExposureProgram
     }
   })
 }
 
 fn decode_y_cb_cr_positioning() -> Decoder(y_cb_cr_positioning.YCbCrPositioning) {
-  decode.string
-  |> decode.then(fn(s) {
-    case s {
-      "Co-sited" -> decode.success(y_cb_cr_positioning.CoSited)
-      "Centered" -> decode.success(y_cb_cr_positioning.Centered)
-      _ -> decode.failure(y_cb_cr_positioning.CoSited, "YCbCrPositioning")
+  decode_trimmed_string()
+  |> decode.map(fn(value) {
+    case value {
+      "1" -> y_cb_cr_positioning.Centered
+      "2" -> y_cb_cr_positioning.CoSited
+      _ -> y_cb_cr_positioning.InvalidYCbCrPositioning
     }
   })
 }
 
 fn decode_resolution_unit() -> Decoder(resolution_unit.ResolutionUnit) {
-  decode.string
-  |> decode.then(fn(s) {
-    case s {
-      "inches" -> decode.success(resolution_unit.Inches)
-      "centimeters" -> decode.success(resolution_unit.Centimeters)
-      _ -> decode.failure(resolution_unit.Inches, "ResolutionUnit")
+  decode_trimmed_string()
+  |> decode.map(fn(value) {
+    case value {
+      "1" -> resolution_unit.NoResolutionTagUnit
+      "2" -> resolution_unit.Inches
+      "3" -> resolution_unit.Centimeters
+      _ -> resolution_unit.InvalidResolutionUnit
     }
   })
 }
 
 fn decode_orientation() -> Decoder(orientation.Orientation) {
-  decode.string
-  |> decode.then(fn(s) {
-    case s {
-      "Horizontal (normal)" -> decode.success(orientation.Horizontal)
-      "Rotate 90 CW" -> decode.success(orientation.Rotate90CW)
-      "Rotate 180" -> decode.success(orientation.Rotate180)
-      "Rotate 270 CW" -> decode.success(orientation.Rotate270CW)
-      "Mirror Vertical" -> decode.success(orientation.MirrorVertical)
-      "Mirror Horizontal" -> decode.success(orientation.MirrorHorizontal)
-      _ -> decode.failure(orientation.Horizontal, "Orientation")
+  decode_trimmed_string()
+  |> decode.map(fn(value) {
+    case value {
+      "1" -> orientation.Horizontal
+      "2" -> orientation.MirrorHorizontal
+      "3" -> orientation.Rotate180
+      "4" -> orientation.MirrorVertical
+      "5" -> orientation.MirrorHorizontalAndRotate270CW
+      "6" -> orientation.Rotate90CW
+      "7" -> orientation.MirrorHorizontalAndRotate90CW
+      "8" -> orientation.Rotate270CW
+      _ -> orientation.InvalidOrientation
     }
   })
 }

@@ -1,9 +1,5 @@
-/// Verify the parsing of a exif segment within a real image gets the appropriate
-/// pieces split out
-/// Test the raw parsed entries that are a rough parsing of all the information in each entry
-/// these values will then be handed to be formatted for what a user actually would want. This step
-/// could be optimized I'm sure, but it's a good intermediate step as I am learning the spec and how to 
-/// interpret these things
+// Verify the parsing of an EXIF segment within a real image gets the appropriate
+// pieces split out. These raw entries are later formatted for consumers.
 // import fixtures/test_segment
 // import gleam/bit_array
 // import gleam/io
@@ -248,3 +244,131 @@
 //   |> raw.raw_exif_entry_to_parsed_tag
 //   |> should.equal(exif_tag.Model("iPhone 14 Pro"))
 // }
+
+import gleam/option.{Some}
+import gleeunit/should
+import glexif/exif_tag
+import glexif/exif_tags/color_space
+import glexif/exif_tags/exposure_program
+import glexif/internal/raw
+
+pub fn signed_rational_motorola_test() {
+  let entry =
+    raw.RawExifEntry(
+      tag: raw.BrightnessValue,
+      data_type: raw.SignedRational(8),
+      component_count: 1,
+      data: <<0xff, 0xff, 0xff, 0xfd, 0, 0, 0, 2>>,
+    )
+
+  raw.raw_exif_entry_to_parsed_tag(exif_tag.new(), entry, raw.Motorola(<<>>)).brightness_value
+  |> should.equal(Some(-1.5))
+}
+
+pub fn signed_rational_intel_test() {
+  let entry =
+    raw.RawExifEntry(
+      tag: raw.ExposureCompensation,
+      data_type: raw.SignedRational(8),
+      component_count: 1,
+      data: <<0xfd, 0xff, 0xff, 0xff, 2, 0, 0, 0>>,
+    )
+
+  raw.raw_exif_entry_to_parsed_tag(exif_tag.new(), entry, raw.Intel(<<>>)).exposure_compensation
+  |> should.equal(Some(-1.5))
+}
+
+pub fn subsecond_ascii_preserves_leading_zeroes_test() {
+  let entry =
+    raw.RawExifEntry(
+      tag: raw.SubSecTimeOriginal,
+      data_type: raw.AsciiString(1),
+      component_count: 4,
+      data: <<"079":utf8, 0>>,
+    )
+
+  raw.raw_exif_entry_to_parsed_tag(exif_tag.new(), entry, raw.Motorola(<<>>)).sub_sec_time_original
+  |> should.equal(Some("079"))
+}
+
+pub fn rational_precision_is_preserved_test() {
+  let f_number =
+    raw.RawExifEntry(
+      tag: raw.FNumber,
+      data_type: raw.UnsignedRational(8),
+      component_count: 1,
+      data: <<0, 0, 0, 89, 0, 0, 0, 50>>,
+    )
+  let focal_length =
+    raw.RawExifEntry(
+      tag: raw.FocalLength,
+      data_type: raw.UnsignedRational(8),
+      component_count: 1,
+      data: <<0, 0, 1, 87, 0, 0, 0, 50>>,
+    )
+
+  let record =
+    raw.raw_exif_entry_to_parsed_tag(
+      exif_tag.new(),
+      f_number,
+      raw.Motorola(<<>>),
+    )
+    |> raw.raw_exif_entry_to_parsed_tag(focal_length, raw.Motorola(<<>>))
+
+  record.f_number |> should.equal(Some(1.78))
+  record.focal_length |> should.equal(Some(6.86))
+}
+
+pub fn extended_numeric_values_test() {
+  let bulb =
+    raw.RawExifEntry(
+      tag: raw.ExposureProgram,
+      data_type: raw.UnsignedShort(2),
+      component_count: 1,
+      data: <<0, 9>>,
+    )
+  let wide_gamut =
+    raw.RawExifEntry(
+      tag: raw.ColorSpace,
+      data_type: raw.UnsignedShort(2),
+      component_count: 1,
+      data: <<0xff, 0xfd>>,
+    )
+  let icc_profile =
+    raw.RawExifEntry(
+      tag: raw.ColorSpace,
+      data_type: raw.UnsignedShort(2),
+      component_count: 1,
+      data: <<0xff, 0xfe>>,
+    )
+
+  let record =
+    raw.raw_exif_entry_to_parsed_tag(exif_tag.new(), bulb, raw.Motorola(<<>>))
+    |> raw.raw_exif_entry_to_parsed_tag(wide_gamut, raw.Motorola(<<>>))
+
+  record.exposure_program |> should.equal(Some(exposure_program.Bulb))
+  record.color_space |> should.equal(Some(color_space.WideGamutRGB))
+
+  raw.raw_exif_entry_to_parsed_tag(
+    exif_tag.new(),
+    icc_profile,
+    raw.Motorola(<<>>),
+  ).color_space
+  |> should.equal(Some(color_space.ICCProfile))
+}
+
+pub fn gps_timestamp_uses_rational_denominators_test() {
+  let entry =
+    raw.RawExifEntry(
+      tag: raw.GPSTimestamp,
+      data_type: raw.UnsignedRational(8),
+      component_count: 3,
+      data: <<
+        0, 0, 0, 23, 0, 0, 0, 1, 0, 0, 0, 34, 0, 0, 0, 1, 0, 0, 0, 113, 0, 0, 0,
+        2,
+      >>,
+    )
+
+  raw.raw_exif_entry_to_parsed_tag(exif_tag.new(), entry, raw.Motorola(<<>>)).gps_timestamp
+  |> should.equal(Some("23:34:56.5"))
+}

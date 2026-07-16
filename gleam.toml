@@ -1,5 +1,5 @@
 name = "glexif"
-version = "0.0.3"
+version = "0.1.0"
 description = "A library for reading Exif data in JPEG files."
 licences = ["MIT"]
 
@@ -8,11 +8,16 @@ licences = ["MIT"]
 #
 # description = ""
 # licences = ["Apache-2.0"]
-# repository = { type = "github", user = "username", repo = "project" }
+repository = { type = "github", user = "justinrassier", repo = "glexif" }
 # links = [{ title = "Website", href = "https://gleam.run" }]
 #
 # For a full reference of all the available options, you can have a look at
 # https://gleam.run/writing-gleam/gleam-toml/.
+
+[[documentation.pages]]
+title = "Changelog"
+path = "changelog.html"
+source = "./CHANGELOG.md"
 
 [dependencies]
 gleam_stdlib = ">= 0.34.0 and < 2.0.0"

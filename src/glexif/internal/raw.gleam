@@ -1,6 +1,7 @@
 import file_streams/file_stream
 import file_streams/file_stream_error
 import gleam/bit_array
+import gleam/bool
 import gleam/dict
 import gleam/float
 import gleam/int
@@ -33,8 +34,17 @@ import glexif/units/fraction.{type Fraction, Fraction}
 import glexif/units/gps_coordinates.{GPSCoordinates, InvalidGPSCoordinates}
 
 pub type ExifParseError {
-  BadHeaders(message: String)
-  InvalidEntry(entry_byte_string: String)
+  StreamReadError(error: file_stream_error.FileStreamError)
+  ExifMarkerNotFound
+  UnexpectedEndOfFile
+  InvalidJpegHeader
+  InvalidSegmentSize(size: Int)
+  InvalidExifHeader
+  InvalidTiffHeader
+  InvalidEntry(offset: Int)
+  InvalidOffset(offset: Int)
+  OffsetCycle(offset: Int)
+  TraversalLimitExceeded
 }
 
 pub type TiffHeader {
@@ -152,329 +162,342 @@ pub type RawExifEntry {
   )
 }
 
-/// move the stream ahead by reading until the exif marker in the file
-pub fn read_until_marker(
-  rs: file_stream.FileStream,
-) -> Result(BitArray, file_stream_error.FileStreamError) {
-  case file_stream.read_bytes(rs, 2) {
-    Ok(bytes) -> {
-      let _ = case bytes {
-        <<0xFF, 0xE1>> -> Ok(bytes)
-        _ -> read_until_marker(rs)
-      }
-    }
-    Error(e) -> Error(e)
-  }
-}
-
-/// size is the two bytes after the exif marker
-pub fn read_exif_size(rs: file_stream.FileStream) -> Int {
-  case file_stream.read_uint16_be(rs) {
-    Ok(val) -> {
-      val
-    }
-    Error(_) -> 0
-  }
-}
-
+/// Read the first standard EXIF APP1 segment from a JPEG stream.
 pub fn read_exif_segment(
-  rs: file_stream.FileStream,
-  exif_full_size: Int,
+  stream: file_stream.FileStream,
 ) -> Result(ExifSegment, ExifParseError) {
-  // the exif size info is part of the data size itself, and we already read those bytes in
-  let raw_bytes =
-    result.unwrap(file_stream.read_bytes(rs, exif_full_size - 2), <<>>)
+  use soi <- result.try(read_exact(stream, 2))
+  case soi {
+    <<0xff, 0xd8>> -> find_exif_segment(stream)
+    _ -> Error(InvalidJpegHeader)
+  }
+}
 
-  let exif_header_bytes = bit_array.slice(raw_bytes, 0, 6)
-
-  let tiff_header_type =
-    raw_bytes
-    |> bit_array.slice(6, 8)
-    |> result.unwrap(<<>>)
-    |> get_tiff_header
-
-  let raw_data =
-    raw_bytes
-    |> bit_array.slice(6, bit_array.byte_size(raw_bytes) - 6)
-    |> result.unwrap(<<>>)
-
-  case exif_header_bytes, tiff_header_type {
-    Ok(<<69, 120, 105, 102, 0, 0>>), Ok(tiff_header) ->
-      case tiff_header {
-        Intel(_) -> {
-          Ok(ExifSegment(
-            size: exif_full_size,
-            exif_header: <<69, 120, 105, 102, 0, 0>>,
-            tiff_header: tiff_header,
-            raw_data: raw_data,
-          ))
-        }
-        Motorola(_) -> {
-          Ok(ExifSegment(
-            size: exif_full_size,
-            exif_header: <<69, 120, 105, 102, 0, 0>>,
-            tiff_header: tiff_header,
-            raw_data: raw_data,
-          ))
-        }
+fn find_exif_segment(
+  stream: file_stream.FileStream,
+) -> Result(ExifSegment, ExifParseError) {
+  use marker <- result.try(read_marker(stream))
+  case marker {
+    // EXIF cannot appear after image data begins.
+    0xd9 | 0xda -> Error(ExifMarkerNotFound)
+    // Standalone markers do not have a size field.
+    marker if marker == 0x01 || marker >= 0xd0 && marker <= 0xd7 ->
+      find_exif_segment(stream)
+    0xd8 -> Error(InvalidJpegHeader)
+    marker -> {
+      use size_bytes <- result.try(read_exact(stream, 2))
+      let size = case size_bytes {
+        <<value:big-unsigned-size(16)>> -> value
+        _ -> 0
       }
-    _, Error(m) -> Error(m)
-    _, _ -> Error(BadHeaders("Generic error"))
+      use _ <- result.try(case size >= 2 {
+        True -> Ok(Nil)
+        False -> Error(InvalidSegmentSize(size))
+      })
+      use payload <- result.try(read_exact(stream, size - 2))
+
+      case marker, payload {
+        // The `Exif` identifier makes this the EXIF segment even when its
+        // required NUL terminator is malformed.
+        0xe1, <<0x45, 0x78, 0x69, 0x66, _rest:bits>> ->
+          parse_exif_segment(payload, size)
+        _, _ -> find_exif_segment(stream)
+      }
+    }
+  }
+}
+
+fn read_marker(stream: file_stream.FileStream) -> Result(Int, ExifParseError) {
+  use prefix <- result.try(read_exact(stream, 1))
+  case prefix {
+    <<0xff>> -> read_marker_code(stream)
+    _ -> Error(InvalidJpegHeader)
+  }
+}
+
+fn read_marker_code(
+  stream: file_stream.FileStream,
+) -> Result(Int, ExifParseError) {
+  use byte <- result.try(read_exact(stream, 1))
+  case byte {
+    // JPEG permits fill bytes between segments.
+    <<0xff>> -> read_marker_code(stream)
+    <<0x00>> -> Error(InvalidJpegHeader)
+    <<marker>> -> Ok(marker)
+    _ -> Error(InvalidJpegHeader)
+  }
+}
+
+fn read_exact(
+  stream: file_stream.FileStream,
+  count: Int,
+) -> Result(BitArray, ExifParseError) {
+  case file_stream.read_bytes_exact(stream, count) {
+    Ok(bytes) -> Ok(bytes)
+    Error(file_stream_error.Eof) -> Error(UnexpectedEndOfFile)
+    Error(error) -> Error(StreamReadError(error))
+  }
+}
+
+fn parse_exif_segment(
+  payload: BitArray,
+  size: Int,
+) -> Result(ExifSegment, ExifParseError) {
+  case payload {
+    <<0x45, 0x78, 0x69, 0x66, 0, 0, raw_data:bits>> -> {
+      use header_bytes <- result.try(
+        bit_array.slice(raw_data, 0, 8)
+        |> result.replace_error(InvalidTiffHeader),
+      )
+      use tiff_header <- result.try(get_tiff_header(header_bytes))
+      Ok(ExifSegment(
+        size: size,
+        exif_header: <<0x45, 0x78, 0x69, 0x66, 0, 0>>,
+        tiff_header: tiff_header,
+        raw_data: raw_data,
+      ))
+    }
+    _ -> Error(InvalidExifHeader)
   }
 }
 
 fn get_tiff_header(
-  tiff_header_bytes: BitArray,
+  header_bytes: BitArray,
 ) -> Result(TiffHeader, ExifParseError) {
-  case bit_array.slice(tiff_header_bytes, 0, 2) {
-    Ok(<<0x4d, 0x4d>>) -> Ok(Motorola(tiff_header_bytes))
-    Ok(<<0x49, 0x49>>) -> Ok(Intel(tiff_header_bytes))
-    _ -> Error(BadHeaders("No matching tiff header type (Motorola or Intel)"))
+  case header_bytes {
+    <<0x4d, 0x4d, 0, 42, _offset:big-unsigned-size(32)>> ->
+      Ok(Motorola(header_bytes))
+    <<0x49, 0x49, 42, 0, _offset:little-unsigned-size(32)>> ->
+      Ok(Intel(header_bytes))
+    _ -> Error(InvalidTiffHeader)
   }
+}
+
+type ParseTask {
+  ParseIfd(offset: Int, location: OffsetLocation)
+  ParseEntry(ifd_offset: Int, location: OffsetLocation, index: Int, count: Int)
+}
+
+type ParsedIfdEntry {
+  ParsedEntry(entry: RawExifEntry)
+  LinkedIfd(offset: Int, location: OffsetLocation)
+  SkippedEntry
 }
 
 pub fn parse_exif_data_as_record(
   exif_segment: ExifSegment,
-) -> exif_tag.ExifTagRecord {
-  // entries are 12 bytes long. They start at an offset of 8, but including the "MM" header bytes means we start at 10
-  let entry_count =
-    bit_array.slice(exif_segment.raw_data, 8, 2)
-    |> result.unwrap(<<0, 0>>)
-    |> fn(slice) {
-      case exif_segment.tiff_header {
-        Motorola(_) -> slice
-        Intel(_) -> utils.bit_array_reverse(slice)
-      }
-    }
-    |> utils.bit_array_to_decimal
-
-  get_raw_entries(
+) -> Result(exif_tag.ExifTagRecord, ExifParseError) {
+  use first_ifd_offset <- result.try(read_u32(
     exif_segment.raw_data,
-    10,
-    entry_count,
-    1,
-    IFD,
+    4,
     exif_segment.tiff_header,
+    InvalidTiffHeader,
+  ))
+  use entries <- result.try(walk_ifds(
+    exif_segment.raw_data,
+    exif_segment.tiff_header,
+    [ParseIfd(first_ifd_offset, IFD)],
+    dict.new(),
+    [],
+    bit_array.byte_size(exif_segment.raw_data) * 2,
+  ))
+
+  Ok(
+    list.fold(entries, exif_tag.new(), fn(record, entry) {
+      raw_exif_entry_to_parsed_tag(record, entry, exif_segment.tiff_header)
+    }),
   )
-  |> list.fold(exif_tag.new(), fn(record, tag) {
-    raw_exif_entry_to_parsed_tag(record, tag, exif_segment.tiff_header)
-  })
 }
 
-/// This method is the logic to recurse through
-/// all the entries in the raw data and try to extract all the necessary raw data
-/// pieces that are later used to format into a consumer friendly type
-///TODO: try to clean this up, it's pretty gnarly
-fn get_raw_entries(
-  segment_bytes: BitArray,
-  start: Int,
-  total_segment_count: Int,
-  current_entry: Int,
-  offset_location: OffsetLocation,
-  tiff_header: TiffHeader,
-) -> List(RawExifEntry) {
-  let entry_bits = bit_array.slice(segment_bytes, start, 12)
-
-  let tag =
-    parse_raw_exif_tag(
-      entry_bits,
-      current_entry,
-      total_segment_count,
-      offset_location,
-      tiff_header,
-    )
-
-  let data_type =
-    entry_bits
-    |> result.try(bit_array.slice(_, 2, 2))
-    |> try_reverse_if_intel(tiff_header)
-    |> result.map(utils.bit_array_to_decimal)
-    |> result.try(dict.get(exif_type_map(), _))
-
-  let component_count =
-    entry_bits
-    |> result.try(bit_array.slice(_, 4, 4))
-    |> try_reverse_if_intel(tiff_header)
-    |> result.map(utils.bit_array_to_decimal)
-
-  let data =
-    entry_bits
-    |> result.try(bit_array.slice(_, 8, 4))
-    // reverse it before sending to parse it
-    |> try_reverse_if_intel(tiff_header)
-    |> result.try(parse_data_or_offset(
-      _,
-      segment_bytes,
-      data_type,
-      result.unwrap(component_count, 0),
-      tiff_header,
-    ))
-    // need to reverse it one more time to get back the right order since
-    // the parse_data_or_offset also had to do its own reverse. 
-    // Definitely should be a better way to do this, but it looks to work
-    |> try_reverse_if_intel(tiff_header)
-
-  case tag, data_type, component_count, data {
-    // In the case we hit the ExifOffset, this points us to a different offset location
-    // to start parsing out more
-    ExifOffset, _, _, Ok(data) -> {
-      let offset = utils.bit_array_to_decimal(data)
-      let entry_count =
-        bit_array.slice(segment_bytes, offset, 2)
-        |> try_reverse_if_intel(tiff_header)
-        |> result.unwrap(<<0, 0>>)
-        |> utils.bit_array_to_decimal
-      // first 2 bytes is the number of elements.
-      list.append(
-        // recurse down the offset
-        get_raw_entries(
-          segment_bytes,
-          offset + 2,
-          entry_count,
-          1,
-          IFD,
-          tiff_header,
-        ),
-        // continue recursing the current segment
-        get_raw_entries(
-          segment_bytes,
-          start + 12,
-          total_segment_count,
-          current_entry + 1,
-          offset_location,
-          tiff_header,
-        ),
+fn walk_ifds(
+  data: BitArray,
+  header: TiffHeader,
+  tasks: List(ParseTask),
+  visited: dict.Dict(Int, Bool),
+  entries: List(RawExifEntry),
+  budget: Int,
+) -> Result(List(RawExifEntry), ExifParseError) {
+  case tasks, budget {
+    [], _ -> Ok(list.reverse(entries))
+    _, budget if budget <= 0 -> Error(TraversalLimitExceeded)
+    [ParseIfd(offset, location), ..rest], _ -> {
+      use _ <- result.try(validate_ifd_offset(data, offset))
+      use _ <- result.try(case dict.has_key(visited, offset) {
+        True -> Error(OffsetCycle(offset))
+        False -> Ok(Nil)
+      })
+      use count <- result.try(read_u16(
+        data,
+        offset,
+        header,
+        InvalidEntry(offset),
+      ))
+      let table_size = 2 + count * 12 + 4
+      use _ <- result.try(checked_slice(
+        data,
+        offset,
+        table_size,
+        InvalidEntry(offset),
+      ))
+      walk_ifds(
+        data,
+        header,
+        [ParseEntry(offset, location, 0, count), ..rest],
+        dict.insert(visited, offset, True),
+        entries,
+        budget - 1,
       )
     }
-    // link off to the next IFD
-    IFDLink(offset), _, _, _ -> {
-      let entry_count =
-        bit_array.slice(segment_bytes, offset, 2)
-        |> try_reverse_if_intel(tiff_header)
-        |> result.unwrap(<<0, 0>>)
-        |> utils.bit_array_to_decimal
-      list.append(
-        get_raw_entries(
-          segment_bytes,
-          offset + 2,
-          entry_count,
-          1,
-          IFD,
-          tiff_header,
-        ),
-        get_raw_entries(
-          segment_bytes,
-          start + 12,
-          total_segment_count,
-          current_entry + 1,
-          offset_location,
-          tiff_header,
-        ),
-      )
-    }
-    GPSLink(offset), _, _, _ -> {
-      let entry_count =
-        bit_array.slice(segment_bytes, offset, 2)
-        |> try_reverse_if_intel(tiff_header)
-        |> result.unwrap(<<0, 0>>)
-        |> utils.bit_array_to_decimal
-
-      list.append(
-        get_raw_entries(
-          segment_bytes,
-          offset + 2,
-          entry_count,
-          1,
-          GPS,
-          tiff_header,
-        ),
-        get_raw_entries(
-          segment_bytes,
-          start + 12,
-          total_segment_count,
-          current_entry + 1,
-          offset_location,
-          tiff_header,
-        ),
-      )
-    }
-    t, Ok(data_type), Ok(component_count), Ok(data)
-      if current_entry <= total_segment_count
+    [ParseEntry(ifd_offset, location, index, count), ..rest], _
+      if index < count
     -> {
-      let base_element = [
-        RawExifEntry(
-          tag: t,
-          data_type: data_type,
-          component_count: component_count,
-          data: data,
-        ),
-      ]
-      list.append(
-        base_element,
-        get_raw_entries(
-          segment_bytes,
-          start + 12,
-          total_segment_count,
-          current_entry + 1,
-          offset_location,
-          tiff_header,
-        ),
-      )
+      let entry_offset = ifd_offset + 2 + index * 12
+      use parsed <- result.try(parse_ifd_entry(
+        data,
+        entry_offset,
+        location,
+        header,
+      ))
+      let continuation = ParseEntry(ifd_offset, location, index + 1, count)
+      case parsed {
+        ParsedEntry(entry) ->
+          walk_ifds(
+            data,
+            header,
+            [continuation, ..rest],
+            visited,
+            [entry, ..entries],
+            budget - 1,
+          )
+        LinkedIfd(offset, linked_location) ->
+          walk_ifds(
+            data,
+            header,
+            [ParseIfd(offset, linked_location), continuation, ..rest],
+            visited,
+            entries,
+            budget - 1,
+          )
+        SkippedEntry ->
+          walk_ifds(
+            data,
+            header,
+            [continuation, ..rest],
+            visited,
+            entries,
+            budget - 1,
+          )
+      }
     }
-    _, _, _, _ -> {
-      []
+    [ParseEntry(ifd_offset, _, _, count), ..rest], _ -> {
+      let next_offset_location = ifd_offset + 2 + count * 12
+      use next_offset <- result.try(read_u32(
+        data,
+        next_offset_location,
+        header,
+        InvalidEntry(next_offset_location),
+      ))
+      let tasks = case next_offset {
+        0 -> rest
+        offset -> [ParseIfd(offset, IFD), ..rest]
+      }
+      walk_ifds(data, header, tasks, visited, entries, budget - 1)
     }
   }
 }
 
-/// Takes the entry and tries to map it to a known RawExifTag
-fn parse_raw_exif_tag(
-  entry: Result(BitArray, Nil),
-  current_entry_count: Int,
-  total_segment_count: Int,
-  offset_location: OffsetLocation,
-  tiff_header: TiffHeader,
-) -> RawExifTag {
-  // the one segment past the last segment is either offset to a new link or the end of things
-  let end_or_offset_index = total_segment_count + 1
-  entry
-  |> result.try(bit_array.slice(_, 0, 2))
-  |> try_reverse_if_intel(tiff_header)
-  |> result.try(dict.get(exif_tag_map(offset_location), _))
-  |> result.try_recover(fn(_) {
-    case entry {
-      Ok(<<0x88, 0x25, 0, 4, 0, 0, 0, 1, rest:bits>>) -> {
-        Ok(GPSLink(utils.bit_array_to_decimal(rest)))
-      }
-      _ -> Error(Nil)
-    }
-  })
-  |> result.try_recover(fn(_) {
-    case current_entry_count, total_segment_count {
-      // if we are one past the last entry, that will either be an offset
-      // to a new IFD or it will mark the end
-      c, _ if c == end_or_offset_index -> {
-        case bit_array.slice(result.unwrap(entry, <<>>), 0, 4) {
-          Ok(<<0, 0, 0, 0>>) -> {
-            Ok(EndOfIFD)
+fn validate_ifd_offset(
+  data: BitArray,
+  offset: Int,
+) -> Result(Nil, ExifParseError) {
+  case offset >= 8 && offset + 2 <= bit_array.byte_size(data) {
+    True -> Ok(Nil)
+    False -> Error(InvalidOffset(offset))
+  }
+}
+
+fn parse_ifd_entry(
+  data: BitArray,
+  offset: Int,
+  location: OffsetLocation,
+  header: TiffHeader,
+) -> Result(ParsedIfdEntry, ExifParseError) {
+  use entry <- result.try(checked_slice(data, offset, 12, InvalidEntry(offset)))
+  use tag_id <- result.try(read_u16(entry, 0, header, InvalidEntry(offset)))
+  use type_id <- result.try(read_u16(entry, 2, header, InvalidEntry(offset)))
+  use component_count <- result.try(read_u32(
+    entry,
+    4,
+    header,
+    InvalidEntry(offset),
+  ))
+
+  case location, tag_id {
+    IFD, 0x8769 ->
+      parse_link(entry, type_id, component_count, IFD, header, offset)
+    IFD, 0x8825 ->
+      parse_link(entry, type_id, component_count, GPS, header, offset)
+    _, _ -> {
+      let tag = parse_raw_exif_tag(tag_id, location)
+      case tag, dict.get(exif_type_map(), type_id) {
+        UnknownExifTag(_), _ | _, Error(_) -> Ok(SkippedEntry)
+        _, Ok(data_type) -> {
+          case
+            parse_data_or_offset(
+              entry,
+              data,
+              data_type,
+              component_count,
+              header,
+            )
+          {
+            Ok(value) ->
+              Ok(
+                ParsedEntry(RawExifEntry(
+                  tag: tag,
+                  data_type: data_type,
+                  component_count: component_count,
+                  data: value,
+                )),
+              )
+            // A malformed optional value does not discard other valid tags.
+            Error(_) -> Ok(SkippedEntry)
           }
-          Ok(offset_bits) -> {
-            let offset = utils.bit_array_to_decimal(offset_bits)
-            Ok(IFDLink(offset))
-          }
-          _ -> Error(Nil)
         }
       }
-      // if we got past the last entry, which happens at the very end of recursion, we are done
-      c, _ if c > end_or_offset_index -> {
-        Ok(EndOfIFD)
-      }
-      _, _ -> Error(Nil)
     }
+  }
+}
+
+fn parse_link(
+  entry: BitArray,
+  type_id: Int,
+  component_count: Int,
+  location: OffsetLocation,
+  header: TiffHeader,
+  entry_offset: Int,
+) -> Result(ParsedIfdEntry, ExifParseError) {
+  use _ <- result.try(case type_id == 4 && component_count == 1 {
+    True -> Ok(Nil)
+    False -> Error(InvalidEntry(entry_offset))
   })
-  |> result.unwrap(
-    UnknownExifTag(bit_array.base16_encode(result.unwrap(entry, <<>>))),
-  )
+  use offset <- result.try(read_u32(
+    entry,
+    8,
+    header,
+    InvalidEntry(entry_offset),
+  ))
+  use _ <- result.try(case offset > 0 {
+    True -> Ok(Nil)
+    False -> Error(InvalidOffset(offset))
+  })
+  Ok(LinkedIfd(offset, location))
+}
+
+fn parse_raw_exif_tag(tag_id: Int, location: OffsetLocation) -> RawExifTag {
+  let tag_bytes = <<tag_id:size(16)>>
+  dict.get(exif_tag_map(location), tag_bytes)
+  |> result.unwrap(UnknownExifTag(bit_array.base16_encode(tag_bytes)))
 }
 
 /// Convert the sub-optimal raw partially parsed entry into
@@ -484,6 +507,7 @@ pub fn raw_exif_entry_to_parsed_tag(
   entry: RawExifEntry,
   tiff_header: TiffHeader,
 ) -> exif_tag.ExifTagRecord {
+  use <- bool.guard(when: !entry_is_valid(entry, tiff_header), return: record)
   case entry.tag {
     ImageDescription -> {
       let image_description =
@@ -518,16 +542,22 @@ pub fn raw_exif_entry_to_parsed_tag(
 
       exif_tag.ExifTagRecord(..record, orientation: orientation)
     }
-    XResolution ->
+    XResolution -> {
+      let Fraction(numerator, denominator) =
+        extract_unsigned_rational_to_fraction(entry.data, tiff_header)
       exif_tag.ExifTagRecord(
         ..record,
-        x_resolution: Some(extract_integer_data(entry, tiff_header)),
+        x_resolution: Some(int.to_float(numerator) /. int.to_float(denominator)),
       )
-    YResolution ->
+    }
+    YResolution -> {
+      let Fraction(numerator, denominator) =
+        extract_unsigned_rational_to_fraction(entry.data, tiff_header)
       exif_tag.ExifTagRecord(
         ..record,
-        y_resolution: Some(extract_integer_data(entry, tiff_header)),
+        y_resolution: Some(int.to_float(numerator) /. int.to_float(denominator)),
       )
+    }
     ResolutionUnit -> {
       let unit = case extract_integer_data(entry, tiff_header) {
         1 -> resolution_unit.NoResolutionTagUnit
@@ -583,10 +613,7 @@ pub fn raw_exif_entry_to_parsed_tag(
         extract_unsigned_rational_to_fraction(entry.data, tiff_header)
       exif_tag.ExifTagRecord(
         ..record,
-        f_number: Some(utils.round_to_n_decimals(
-          int.to_float(numerator) /. int.to_float(denominator),
-          1,
-        )),
+        f_number: Some(int.to_float(numerator) /. int.to_float(denominator)),
       )
     }
     ExposureProgram -> {
@@ -600,6 +627,7 @@ pub fn raw_exif_entry_to_parsed_tag(
         6 -> exposure_program.Action
         7 -> exposure_program.Portrait
         8 -> exposure_program.Landscape
+        9 -> exposure_program.Bulb
         _ -> exposure_program.InvalidExposureProgram
       }
       exif_tag.ExifTagRecord(..record, exposure_program: Some(exposure_program))
@@ -612,7 +640,7 @@ pub fn raw_exif_entry_to_parsed_tag(
 
     ExifVersion -> {
       let exif_version =
-        reverse_if_intel(entry.data, tiff_header)
+        entry.data
         |> extract_ascii_data
         |> Some
       exif_tag.ExifTagRecord(..record, exif_version: exif_version)
@@ -657,7 +685,6 @@ pub fn raw_exif_entry_to_parsed_tag(
     ComponentsConfiguration -> {
       let components_configuration =
         entry.data
-        |> reverse_if_intel(tiff_header)
         |> bit_array_to_decimal_list
         |> list.map(fn(v) {
           case v {
@@ -691,35 +718,33 @@ pub fn raw_exif_entry_to_parsed_tag(
     //   )
     // }
     ApertureValue -> {
-      // The actual aperture value of lens when the image was taken. To convert this value to ordinary F-number(F-stop), calculate this value's power of root 2 (=1.4142). For example, if value is '5', F-number is 1.4142^5 = F5.6.
+      // Convert the APEX aperture value to an F-number using 2^(APEX / 2).
       //https://www.media.mit.edu/pia/Research/deepview/exif.html
       let Fraction(numerator, denominator) =
-        extract_signed_rational_to_fraction(entry.data)
+        extract_unsigned_rational_to_fraction(entry.data, tiff_header)
 
       let aperture_decimal =
         int.to_float(numerator) /. int.to_float(denominator)
 
       let aperture_value =
-        float.power(1.4142, aperture_decimal)
+        float.power(2.0, aperture_decimal /. 2.0)
         |> result.unwrap(0.0)
-        |> utils.round_to_n_decimals(1)
 
       exif_tag.ExifTagRecord(..record, aperture_value: Some(aperture_value))
     }
 
     BrightnessValue -> {
       let Fraction(numerator, denominator) =
-        extract_unsigned_rational_to_fraction(entry.data, tiff_header)
+        extract_signed_rational_to_fraction(entry.data, tiff_header)
       let brightness_value =
         int.to_float(numerator) /. int.to_float(denominator)
-        |> utils.round_to_n_decimals(9)
 
       exif_tag.ExifTagRecord(..record, brightness_value: Some(brightness_value))
     }
 
     ExposureCompensation -> {
       let Fraction(numerator, denominator) =
-        extract_unsigned_rational_to_fraction(entry.data, tiff_header)
+        extract_signed_rational_to_fraction(entry.data, tiff_header)
 
       let exposure_compensation =
         int.to_float(numerator) /. int.to_float(denominator)
@@ -746,9 +771,9 @@ pub fn raw_exif_entry_to_parsed_tag(
     }
     //
     Flash -> {
+      let value = extract_integer_data(entry, tiff_header)
       let flash =
-        bit_array.slice(entry.data, 0, 2)
-        |> result.try(dict.get(internal_flash.flash_tag_map(), _))
+        dict.get(internal_flash.flash_tag_map(), <<value:size(16)>>)
         |> result.unwrap(flash.InvalidFlash)
 
       exif_tag.ExifTagRecord(..record, flash: Some(flash))
@@ -758,16 +783,19 @@ pub fn raw_exif_entry_to_parsed_tag(
       let Fraction(numerator, denominator) =
         extract_unsigned_rational_to_fraction(entry.data, tiff_header)
 
-      let focal_length =
-        int.to_float(numerator) /. int.to_float(denominator)
-        |> utils.round_to_n_decimals(1)
+      let focal_length = int.to_float(numerator) /. int.to_float(denominator)
 
       exif_tag.ExifTagRecord(..record, focal_length: Some(focal_length))
     }
 
     SubjectArea -> {
       let subject_area =
-        extract_unsigned_short_to_int_list(entry.data, entry.component_count, 0)
+        extract_unsigned_short_to_int_list(
+          entry.data,
+          entry.component_count,
+          0,
+          tiff_header,
+        )
 
       exif_tag.ExifTagRecord(..record, subject_area: Some(subject_area))
     }
@@ -777,8 +805,6 @@ pub fn raw_exif_entry_to_parsed_tag(
     SubSecTimeOriginal -> {
       let sub_sec_time_original =
         extract_ascii_data(entry.data)
-        |> int.parse
-        |> result.unwrap(-1)
         |> Some
       exif_tag.ExifTagRecord(
         ..record,
@@ -789,8 +815,6 @@ pub fn raw_exif_entry_to_parsed_tag(
     SubSecTimeDigitized -> {
       let sub_sec_time_digitized =
         extract_ascii_data(entry.data)
-        |> int.parse
-        |> result.unwrap(-1)
         |> Some
       exif_tag.ExifTagRecord(
         ..record,
@@ -801,7 +825,6 @@ pub fn raw_exif_entry_to_parsed_tag(
     FlashpixVersion -> {
       let flash_pix_version =
         entry.data
-        |> reverse_if_intel(tiff_header)
         |> extract_ascii_data
       exif_tag.ExifTagRecord(
         ..record,
@@ -810,11 +833,12 @@ pub fn raw_exif_entry_to_parsed_tag(
     }
 
     ColorSpace -> {
-      let color_space = case bit_array.slice(entry.data, 0, 2) {
-        Ok(<<0x00, 0x01>>) -> color_space.SRGB
-        Ok(<<0x00, 0x02>>) -> color_space.AdobeRGB
-        Ok(<<0xff, 0xfd>>) -> color_space.ICCProfile
-        Ok(<<0xff, 0xff>>) -> color_space.Uncalibrated
+      let color_space = case extract_integer_data(entry, tiff_header) {
+        0x0001 -> color_space.SRGB
+        0x0002 -> color_space.AdobeRGB
+        0xfffd -> color_space.WideGamutRGB
+        0xfffe -> color_space.ICCProfile
+        0xffff -> color_space.Uncalibrated
         _ -> color_space.InvalidColorSpace
       }
       exif_tag.ExifTagRecord(..record, color_space: Some(color_space))
@@ -926,7 +950,7 @@ pub fn raw_exif_entry_to_parsed_tag(
       exif_tag.ExifTagRecord(..record, gps_latitude_ref: Some(gps_latitude_ref))
     }
     GPSLatitude -> {
-      let fraction_list = bit_array_to_fraction_list(entry.data)
+      let fraction_list = bit_array_to_fraction_list(entry.data, tiff_header)
       let gps_coordinates = case fraction_list {
         [
           Fraction(degrees_numerator, degrees_denominator),
@@ -954,7 +978,7 @@ pub fn raw_exif_entry_to_parsed_tag(
       )
     }
     GPSLongitude -> {
-      let fraction_list = bit_array_to_fraction_list(entry.data)
+      let fraction_list = bit_array_to_fraction_list(entry.data, tiff_header)
       let gps_coordinates = case fraction_list {
         [
           Fraction(degrees_numerator, degrees_denominator),
@@ -999,14 +1023,14 @@ pub fn raw_exif_entry_to_parsed_tag(
       exif_tag.ExifTagRecord(..record, gps_altitude: Some(gps_altitude_float))
     }
     GPSTimestamp -> {
-      let fraction_list = bit_array_to_fraction_list(entry.data)
+      let fraction_list = bit_array_to_fraction_list(entry.data, tiff_header)
       let gps_timestamp = case fraction_list {
-        [Fraction(n1, _), Fraction(n2, _), Fraction(n3, _)] ->
-          int.to_string(n1)
+        [hours, minutes, seconds] ->
+          fraction_to_string(hours)
           <> ":"
-          <> int.to_string(n2)
+          <> fraction_to_string(minutes)
           <> ":"
-          <> int.to_string(n3)
+          <> fraction_to_string(seconds)
         _ -> "Invalid"
       }
       exif_tag.ExifTagRecord(..record, gps_timestamp: Some(gps_timestamp))
@@ -1039,6 +1063,164 @@ pub fn raw_exif_entry_to_parsed_tag(
   }
 }
 
+fn entry_is_valid(entry: RawExifEntry, header: TiffHeader) -> Bool {
+  case entry.tag {
+    ImageDescription
+    | Make
+    | Model
+    | Software
+    | ModifyDate
+    | HostComputer
+    | DateTimeOriginal
+    | CreateDate
+    | OffsetTime
+    | OffsetTimeOriginal
+    | OffsetTimeDigitized
+    | SubSecTimeOriginal
+    | SubSecTimeDigitized
+    | LensMake
+    | LensModel
+    | GPSLatitudeRef
+    | GPSLongitudeRef
+    | GPSSpeedRef ->
+      is_type(entry, AsciiString(1))
+      && entry.component_count > 0
+      && data_size_is_valid(entry)
+      && ascii_is_valid(entry.data)
+    ExifVersion | FlashpixVersion ->
+      is_type(entry, Undefined(1))
+      && entry.component_count == 4
+      && data_size_is_valid(entry)
+      && ascii_is_valid(entry.data)
+    ComponentsConfiguration ->
+      is_type(entry, Undefined(1))
+      && entry.component_count == 4
+      && data_size_is_valid(entry)
+    SceneType ->
+      is_type(entry, Undefined(1))
+      && entry.component_count == 1
+      && data_size_is_valid(entry)
+      && entry.data == <<1>>
+    Orientation
+    | ResolutionUnit
+    | YCbCrPositioning
+    | ExposureProgram
+    | ISO
+    | MeteringMode
+    | Flash
+    | ColorSpace
+    | SensingMethod
+    | ExposureMode
+    | WhiteBalance
+    | FocalLengthIn35mmFormat
+    | SceneCaptureType
+    | CompositeImage ->
+      is_type(entry, UnsignedShort(2))
+      && entry.component_count == 1
+      && data_size_is_valid(entry)
+    ExifImageWidth | ExifImageHeight ->
+      is_unsigned_integer(entry)
+      && entry.component_count == 1
+      && data_size_is_valid(entry)
+    XResolution
+    | YResolution
+    | ExposureTime
+    | FNumber
+    | FocalLength
+    | GPSAltitude
+    | GPSSpeed ->
+      is_type(entry, UnsignedRational(8))
+      && entry.component_count == 1
+      && data_size_is_valid(entry)
+      && rational_denominators_are_valid(entry.data, 1, header, 0)
+    ApertureValue ->
+      is_type(entry, UnsignedRational(8))
+      && entry.component_count == 1
+      && data_size_is_valid(entry)
+      && rational_denominators_are_valid(entry.data, 1, header, 0)
+      && aperture_is_safe(entry.data, header)
+    BrightnessValue | ExposureCompensation ->
+      is_type(entry, SignedRational(8))
+      && entry.component_count == 1
+      && data_size_is_valid(entry)
+      && rational_denominators_are_valid(entry.data, 1, header, 0)
+    GPSLatitude | GPSLongitude | GPSTimestamp ->
+      is_type(entry, UnsignedRational(8))
+      && entry.component_count == 3
+      && data_size_is_valid(entry)
+      && rational_denominators_are_valid(entry.data, 3, header, 0)
+    SubjectArea ->
+      is_type(entry, UnsignedShort(2))
+      && entry.component_count >= 2
+      && entry.component_count <= 4
+      && data_size_is_valid(entry)
+    GPSAltitudeRef ->
+      is_type(entry, UnsignedByte(1))
+      && entry.component_count == 1
+      && data_size_is_valid(entry)
+    // These tags are recognized but intentionally not exposed yet.
+    ShutterSpeedValue
+    | MakerData
+    | LensInfo
+    | ExifOffset
+    | GPSLink(_)
+    | IFDLink(_)
+    | EndOfIFD
+    | UnknownExifTag(_) -> False
+  }
+}
+
+fn is_type(entry: RawExifEntry, expected: RawExifType) -> Bool {
+  entry.data_type == expected
+}
+
+fn is_unsigned_integer(entry: RawExifEntry) -> Bool {
+  case entry.data_type {
+    UnsignedShort(_) | UnsignedLong(_) -> True
+    _ -> False
+  }
+}
+
+fn data_size_is_valid(entry: RawExifEntry) -> Bool {
+  bit_array.byte_size(entry.data)
+  == entry.data_type.bytes * entry.component_count
+}
+
+fn ascii_is_valid(data: BitArray) -> Bool {
+  data
+  |> utils.trim_zero_bits
+  |> bit_array.to_string
+  |> result.is_ok
+}
+
+fn rational_denominators_are_valid(
+  data: BitArray,
+  count: Int,
+  header: TiffHeader,
+  index: Int,
+) -> Bool {
+  case index >= count {
+    True -> True
+    False ->
+      case read_u32(data, index * 8 + 4, header, InvalidEntry(index)) {
+        Ok(denominator) if denominator != 0 ->
+          rational_denominators_are_valid(data, count, header, index + 1)
+        _ -> False
+      }
+  }
+}
+
+fn aperture_is_safe(data: BitArray, header: TiffHeader) -> Bool {
+  case
+    read_u32(data, 0, header, InvalidEntry(0)),
+    read_u32(data, 4, header, InvalidEntry(0))
+  {
+    Ok(numerator), Ok(denominator) if denominator != 0 ->
+      int.to_float(numerator) /. int.to_float(denominator) <=. 2046.0
+    _, _ -> False
+  }
+}
+
 fn bit_array_to_decimal_list(b: BitArray) -> List(Int) {
   case b {
     <<i, rest:bits>> -> {
@@ -1048,12 +1230,38 @@ fn bit_array_to_decimal_list(b: BitArray) -> List(Int) {
   }
 }
 
-fn bit_array_to_fraction_list(b: BitArray) -> List(Fraction) {
-  case b {
-    <<numerator:size(32), denominator:size(32), rest:bits>> -> {
-      [Fraction(numerator, denominator), ..bit_array_to_fraction_list(rest)]
-    }
-    _ -> []
+fn bit_array_to_fraction_list(
+  data: BitArray,
+  header: TiffHeader,
+) -> List(Fraction) {
+  bit_array_to_fraction_list_loop(data, header, 0, [])
+  |> list.reverse
+}
+
+fn bit_array_to_fraction_list_loop(
+  data: BitArray,
+  header: TiffHeader,
+  offset: Int,
+  fractions: List(Fraction),
+) -> List(Fraction) {
+  case
+    read_u32(data, offset, header, InvalidEntry(offset)),
+    read_u32(data, offset + 4, header, InvalidEntry(offset))
+  {
+    Ok(numerator), Ok(denominator) ->
+      bit_array_to_fraction_list_loop(data, header, offset + 8, [
+        Fraction(numerator, denominator),
+        ..fractions
+      ])
+    _, _ -> fractions
+  }
+}
+
+fn fraction_to_string(fraction: Fraction) -> String {
+  let Fraction(numerator, denominator) = fraction
+  case numerator % denominator {
+    0 -> int.to_string(numerator / denominator)
+    _ -> float.to_string(int.to_float(numerator) /. int.to_float(denominator))
   }
 }
 
@@ -1061,12 +1269,14 @@ fn extract_unsigned_short_to_int_list(
   data: BitArray,
   size: Int,
   count: Int,
+  header: TiffHeader,
 ) -> List(Int) {
-  case data {
-    <<num:size(16), rest:bits>> if count < size -> {
-      [num, ..extract_unsigned_short_to_int_list(rest, size, count + 1)]
-    }
-    _ -> []
+  case count < size, read_u16(data, count * 2, header, InvalidEntry(count)) {
+    True, Ok(value) -> [
+      value,
+      ..extract_unsigned_short_to_int_list(data, size, count + 1, header)
+    ]
+    _, _ -> []
   }
 }
 
@@ -1104,27 +1314,23 @@ fn extract_integer_data(
   tiff_header: TiffHeader,
 ) -> Int {
   case exif_entry.data_type {
-    UnsignedShort(size) | UnsignedLong(size) ->
-      bit_array.slice(exif_entry.data, 0, size * exif_entry.component_count)
-      |> result.unwrap(<<>>)
-      |> utils.bit_array_to_decimal
+    UnsignedShort(_) ->
+      read_u16(exif_entry.data, 0, tiff_header, InvalidEntry(0))
+      |> result.unwrap(0)
+    UnsignedLong(_) ->
+      read_u32(exif_entry.data, 0, tiff_header, InvalidEntry(0))
+      |> result.unwrap(0)
     UnsignedRational(_) -> {
       let numerator =
-        exif_entry.data
-        |> bit_array.slice(0, 4)
-        |> try_reverse_if_intel(tiff_header)
-        |> result.map(utils.bit_array_to_decimal)
+        read_u32(exif_entry.data, 0, tiff_header, InvalidEntry(0))
         |> result.unwrap(0)
       let denominator =
-        exif_entry.data
-        |> bit_array.slice(4, 4)
-        |> try_reverse_if_intel(tiff_header)
-        |> result.map(utils.bit_array_to_decimal)
+        read_u32(exif_entry.data, 4, tiff_header, InvalidEntry(0))
         |> result.unwrap(0)
 
       numerator / denominator
     }
-    _ -> panic as "unimplemented data type"
+    _ -> 0
   }
 }
 
@@ -1133,43 +1339,24 @@ fn extract_unsigned_rational_to_fraction(
   tiff_header: TiffHeader,
 ) -> Fraction {
   let numerator =
-    data
-    |> bit_array.slice(0, 4)
-    |> try_reverse_if_intel(tiff_header)
-    |> result.map(utils.bit_array_to_decimal)
+    read_u32(data, 0, tiff_header, InvalidEntry(0))
     |> result.unwrap(0)
   let denominator =
-    data
-    |> bit_array.slice(4, 4)
-    |> try_reverse_if_intel(tiff_header)
-    |> result.map(utils.bit_array_to_decimal)
+    read_u32(data, 4, tiff_header, InvalidEntry(0))
     |> result.unwrap(0)
 
   Fraction(numerator, denominator)
 }
 
-fn extract_signed_rational_to_fraction(data: BitArray) -> Fraction {
-  let assert Ok(signed) = bit_array.base16_encode(data) |> string.first
-
-  // TODO: I don't remember this stuff anymore! Ugh I feel ashamed
-  case signed {
-    "0" -> signed
-    "1" ->
-      panic as "re-learn how the heck to work with signed binary stuff again"
-    _ -> panic as "wut?"
-  }
-
-  // TODO: For now just treat as unsigned rational since my 
-  // test data has this as positive values
+fn extract_signed_rational_to_fraction(
+  data: BitArray,
+  tiff_header: TiffHeader,
+) -> Fraction {
   let numerator =
-    data
-    |> bit_array.slice(1, 3)
-    |> result.map(utils.bit_array_to_decimal)
+    read_i32(data, 0, tiff_header, InvalidEntry(0))
     |> result.unwrap(0)
   let denominator =
-    data
-    |> bit_array.slice(5, 3)
-    |> result.map(utils.bit_array_to_decimal)
+    read_i32(data, 4, tiff_header, InvalidEntry(0))
     |> result.unwrap(0)
 
   Fraction(numerator, denominator)
@@ -1252,45 +1439,78 @@ fn exif_tag_map(offset_location: OffsetLocation) {
 }
 
 fn parse_data_or_offset(
-  data_or_offset: BitArray,
+  entry: BitArray,
   full_segment: BitArray,
-  data_type: Result(RawExifType, Nil),
+  data_type: RawExifType,
   component_count: Int,
   tiff_header: TiffHeader,
-) -> Result(BitArray, Nil) {
-  let dt = result.unwrap(data_type, Unknown(0))
-
-  case data_or_offset, dt {
-    _, Unknown(_) -> Error(Nil)
-    d, t -> {
-      let size = t.bytes * component_count
-      let offset = utils.bit_array_to_decimal(data_or_offset)
-      case t.bytes {
-        // data is in the array already
-        _bytes if size <= 4 -> {
-          reverse_if_intel(d, tiff_header)
-          |> bit_array.slice(0, size)
-        }
-        //otherwise it contains the offset
-        _ ->
-          bit_array.slice(full_segment, offset, size)
-          |> try_reverse_if_intel(tiff_header)
+) -> Result(BitArray, ExifParseError) {
+  let size = data_type.bytes * component_count
+  case component_count > 0 && size <= 4 {
+    True -> checked_slice(entry, 8, size, InvalidEntry(8))
+    False if component_count <= 0 -> Error(InvalidEntry(8))
+    False -> {
+      use offset <- result.try(read_u32(entry, 8, tiff_header, InvalidEntry(8)))
+      case offset >= 8 {
+        True -> checked_slice(full_segment, offset, size, InvalidOffset(offset))
+        False -> Error(InvalidOffset(offset))
       }
     }
   }
 }
 
-fn try_reverse_if_intel(
-  bit_array: Result(BitArray, Nil),
-  tiff_header: TiffHeader,
-) -> Result(BitArray, Nil) {
-  bit_array
-  |> result.try(fn(slice) { Ok(reverse_if_intel(slice, tiff_header)) })
+fn checked_slice(
+  data: BitArray,
+  offset: Int,
+  length: Int,
+  error: ExifParseError,
+) -> Result(BitArray, ExifParseError) {
+  case
+    offset >= 0 && length >= 0 && offset + length <= bit_array.byte_size(data)
+  {
+    True -> bit_array.slice(data, offset, length) |> result.replace_error(error)
+    False -> Error(error)
+  }
 }
 
-fn reverse_if_intel(bit_array: BitArray, tiff_header: TiffHeader) -> BitArray {
-  case tiff_header {
-    Intel(_) -> utils.bit_array_reverse(bit_array)
-    Motorola(_) -> bit_array
+fn read_u16(
+  data: BitArray,
+  offset: Int,
+  header: TiffHeader,
+  error: ExifParseError,
+) -> Result(Int, ExifParseError) {
+  use bytes <- result.try(checked_slice(data, offset, 2, error))
+  case header, bytes {
+    Motorola(_), <<value:big-unsigned-size(16)>> -> Ok(value)
+    Intel(_), <<value:little-unsigned-size(16)>> -> Ok(value)
+    _, _ -> Error(error)
+  }
+}
+
+fn read_u32(
+  data: BitArray,
+  offset: Int,
+  header: TiffHeader,
+  error: ExifParseError,
+) -> Result(Int, ExifParseError) {
+  use bytes <- result.try(checked_slice(data, offset, 4, error))
+  case header, bytes {
+    Motorola(_), <<value:big-unsigned-size(32)>> -> Ok(value)
+    Intel(_), <<value:little-unsigned-size(32)>> -> Ok(value)
+    _, _ -> Error(error)
+  }
+}
+
+fn read_i32(
+  data: BitArray,
+  offset: Int,
+  header: TiffHeader,
+  error: ExifParseError,
+) -> Result(Int, ExifParseError) {
+  use bytes <- result.try(checked_slice(data, offset, 4, error))
+  case header, bytes {
+    Motorola(_), <<value:big-signed-size(32)>> -> Ok(value)
+    Intel(_), <<value:little-signed-size(32)>> -> Ok(value)
+    _, _ -> Error(error)
   }
 }

@@ -6,3 +6,6 @@ erl_crash.dump
 
 # because I'm a silly JS guy that doesn't know other file watchers 
 nodemon.json
+
+# Local images for the optional private ExifTool parity test.
+/test/private-fixtures/
